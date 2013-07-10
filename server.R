@@ -7,8 +7,10 @@ library(data.table.extras) ## install_github("data.table.extras", "kevinushey")
 library(gtools)
 library(stringr)
 
+DATA <- "data/cd8/sample_proportions_bg_substracted.rds"
+META <- "data/meta.rds"
+
 source("common_functions.R")
-source("CytokineDataClass.R")
 
 ## TODO: allow other plot types
 plot_type <- "boxplot"
@@ -73,11 +75,10 @@ shinyServer( function(input, output, session) {
   }
   
   ## read in the data
-  d <- readRDS("data/sample_proportions_bg_substracted.rds")
-  
-  #dat_indiv <- readRDS("data/indiv_proportions_postProcess.rds")
-  orig_cytokines <- readRDS("data/cytokines.rds")
-  meta <- readRDS("data/meta.rds")
+  d <- readRDS(DATA)
+  l <- levels( d$Cytokine )
+  orig_cytokines <- strsplit( l[ length(l) ], " x ", fixed=TRUE)[[1]]
+  meta <- readRDS(META)
   
   ## define getters
   

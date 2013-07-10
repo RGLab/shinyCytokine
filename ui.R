@@ -1,7 +1,7 @@
 library(shinyGridster)
 
 meta <- readRDS("data/meta.rds")
-dat <- readRDS("data/res.rds")
+dat <- readRDS("data/res_cd8.rds")
 
 ## width, height for gridster + plot elements
 width <- 430
