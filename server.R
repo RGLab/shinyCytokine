@@ -6,8 +6,9 @@ library(data.table)
 library(data.table.extras) ## install_github("data.table.extras", "kevinushey")
 library(gtools)
 library(stringr)
+library(rCharts)
 
-DATA <- "data/cd8/sample_proportions_bg_substracted.rds"
+DATA <- "data/cd4/sample_proportions_bg_substracted.rds"
 META <- "data/meta.rds"
 
 source("common_functions.R")
@@ -25,6 +26,7 @@ phenoToLabel <- function(x) {
 
 shinyServer( function(input, output, session) {
   
+  y_var <- "Sample"
   
   ## A function used to filter a dataset based on a vector of
   ## cytokines
@@ -66,6 +68,7 @@ shinyServer( function(input, output, session) {
     }
   }
   
+  ## filter a function based on levels of a factor
   filter1 <- function(dat, var, levels) {
     if( var == "None" ) {
       return(dat)
@@ -75,7 +78,9 @@ shinyServer( function(input, output, session) {
   }
   
   ## read in the data
-  d <- readRDS(DATA)
+  ## FIXME: only allocate one reference for the data
+  ## need to properly handle subsetting and filtering in the plot commands
+  d <- dat <- readRDS(DATA)
   l <- levels( d$Cytokine )
   orig_cytokines <- strsplit( l[ length(l) ], " x ", fixed=TRUE)[[1]]
   meta <- readRDS(META)
@@ -195,244 +200,188 @@ shinyServer( function(input, output, session) {
     }
   })
   
-  ## heatmap plot
-  output$heatmap <- renderPlot({
-    
-    facet1 <- getFacet1()
-    facet2 <- getFacet2()
-    heatmap_level <- getHeatmapLevel()
-    cytokines <- getCytokines()
-    cytokine_filter <- getCytokineFilter()
-    cytokine_order <- getCytokineOrder()
-    phenotype <- getPhenotype()
-    filter1 <- getFilter1()
-    filter1_cb <- getFilter1Cb()
-    custom_filter <- getCustomFilter()
-    
-    y_var <- "Sample"
-    
-    ## filter the cytokines
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order)
-    d <- customFilter(d, custom_filter)
-    d <- filter1(d, filter1, filter1_cb)
-    
-    p1 <- ggplot( d, aes_string(x="Cytokine", y=y_var, fill=phenotype)) +
-      geom_tile() +
-      scale_fill_gradient(low="white", high="steelblue", name=phenoToLabel(phenotype)) +
-      scale_x_discrete(expand=c(0,0)) +
-      scale_y_discrete(expand=c(0,0), breaks=NULL) +
-      xlab("Cytokine") +
-      ylab(heatmap_level) +
-      theme( axis.text.x = element_text(angle=45, hjust=1) )
-    
-    ## reorder by phenotype
-    if( facet1 != "Original Ordering" ) {
-      
-      ## double facetting doesn't work for the heatmap (yet? it might be
-      ## too cluttered / ugly anyhow)
-      #       if( facet2 == "None" ) {
-      p1 <- p1 + facet_grid( paste( facet1, "~ ." ), space="free", scales="free" )
-      #       } else {
-      #        p1 <- p1 + facet_grid( paste( facet1, "~", facet2 ), space="free", scales="free" )
-      #       }
-      
-    }
-    
-    plot(p1)
-    
-  })
+  ## wrap all the plots in an observer -- this is done so that the data is
+  ## updated / filtered only once per new parameter update, rather than
+  ## once for each plot generated
   
-  ## heatmap info
-  #   output$debug <- renderPrint({
-  #     output <- list( 
-  #       `Hover Info`=input$heatmap_hover, 
-  #       `Click Info`=input$heatmap_click 
-  #     )
-  #     return(output)
-  #   })
-  
-  ## line chart
-  output$linechart <- renderPlot({
+  ## FIXME: plots no longer grey out when being updated inside an `observe`
+  ## call
+  observe({
     
     individual <- getIndividual()
+    facet1 <- getFacet1()
+    facet2 <- getFacet2()
+    heatmap_level <- getHeatmapLevel()
     cytokines <- getCytokines()
     cytokine_filter <- getCytokineFilter()
     cytokine_order <- getCytokineOrder()
     phenotype <- getPhenotype()
-    facet1 <- getFacet1()
-    facet2 <- getFacet2()
     filter1 <- getFilter1()
     filter1_cb <- getFilter1Cb()
     custom_filter <- getCustomFilter()
     
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order)
-    d <- droplevels(d[ d$PTID == individual, ])
+    ## filter the cytokines
+    d <- filter_cytokines(dat, cytokines, cytokine_filter, cytokine_order)
     d <- customFilter(d, custom_filter)
     d <- filter1(d, filter1, filter1_cb)
     
-    p <- ggplot(d, aes_string(x="Cytokine", y=phenotype, group="Sample")) +
-      geom_point() +
-      geom_line( aes(x=as.integer( factor(Cytokine) ))) +
-      xlab(paste("Individual:", individual)) +
-      ggtitle("Proportion by Cytokine") +
-      guides(color=guide_legend(nrow=10)) +
-      theme( axis.text.x = element_text(angle=45, hjust=1) )
-    
-    if( facet1 != "Original Ordering" ) {
-      p <- p + aes_string(x="Cytokine", y=phenotype, group="Sample", color=facet1)
-      if( facet2 != "None" ) {
-        p <- p + facet_wrap(facet2)
+    ## heatmap plot
+    output$heatmap <- renderPlot({
+      
+      p1 <- ggplot( d, aes_string(x="Cytokine", y=y_var, fill=phenotype)) +
+        geom_tile() +
+        scale_fill_gradient(low="white", high="steelblue", name=phenoToLabel(phenotype)) +
+        scale_x_discrete(expand=c(0,0)) +
+        scale_y_discrete(expand=c(0,0), breaks=NULL) +
+        xlab("Cytokine") +
+        ylab(heatmap_level) +
+        theme( axis.text.x = element_text(angle=45, hjust=1) )
+      
+      ## reorder by phenotype
+      if( facet1 != "Original Ordering" ) {
+        
+        ## double facetting doesn't work for the heatmap (yet? it might be
+        ## too cluttered / ugly anyhow)
+        #       if( facet2 == "None" ) {
+        p1 <- p1 + facet_grid( paste( facet1, "~ ." ), space="free", scales="free" )
+        #       } else {
+        #        p1 <- p1 + facet_grid( paste( facet1, "~", facet2 ), space="free", scales="free" )
+        #       }
+        
       }
-    }
+      
+      plot(p1)
+      
+    })
     
-    ## y label -- for some reason, it has to occur after the facetting code
-    p <- p +
-      ylab( phenoToLabel(phenotype) )
+    ## linechart
+    output$linechart <- renderPlot({
+      
+      d_sub <- droplevels( d[ d$PTID == individual, ] )
+      p <- ggplot( d_sub, aes_string(x="Cytokine", y=phenotype, group="Sample")) +
+        geom_point() +
+        geom_line( aes(x=as.integer( factor(Cytokine) ))) +
+        xlab(paste("Individual:", individual)) +
+        ggtitle("Proportion by Cytokine") +
+        guides(color=guide_legend(nrow=10)) +
+        theme( axis.text.x = element_text(angle=45, hjust=1) )
+      
+      if( facet1 != "Original Ordering" ) {
+        p <- p + aes_string(x="Cytokine", y=phenotype, group="Sample", color=facet1)
+        if( facet2 != "None" ) {
+          p <- p + facet_wrap(facet2)
+        }
+      }
+      
+      ## y label -- for some reason, it has to occur after the facetting code
+      p <- p +
+        ylab( phenoToLabel(phenotype) )
+      
+      plot(p)
+      
+    })
     
-    plot(p)
-    
-  })
-  
-  ## non-faceted plot: proportion by phenotype
-  output$boxplot <- renderPlot({
-    
-    facet1 <- getFacet1()
-    facet2 <- getFacet2()
-    #plot_type <- getPlotType()
-    heatmap_level <- getHeatmapLevel()
-    cytokines <- getCytokines()
-    cytokine_filter <- getCytokineFilter()
-    cytokine_order <- getCytokineOrder()
-    phenotype <- getPhenotype()
-    filter1 <- getFilter1()
-    filter1_cb <- getFilter1Cb()
-    custom_filter <- getCustomFilter()
-    
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order)
-    d <- filter1(d, filter1, filter1_cb)
-    d <- customFilter(d, custom_filter)
-    
-    if( facet1 == "Original Ordering" ) {
-      plot( 1 ~ 1, type='n', axes=FALSE, frame.plot=FALSE, ann=FALSE)
-      text( x=1, y=1, labels="Select a Facet to view Boxplots of Proportions")
-      return(NULL)
-    }
-    
-    p <- ggplot(d) +
-      theme( axis.text.x = element_text(angle=45, hjust=1) )
-    
-    if( facet2 != "None" ) {
-      p <- p + facet_grid( paste(". ~", facet2) )
-    }
-    
-    ## what kind of plot to generate?
-    p <- p + switch(plot_type,
-      boxplot=geom_boxplot( aes_string(x=facet1, y=phenotype) ),
-      histogram=geom_histogram( aes_string(x=phenotype, fill=facet1), alpha=0.5, position="identity" ),
-      density=geom_density( aes_string(x=phenotype, fill=facet1), alpha=0.5 )
-    )
-    
-    if( plot_type == "boxplot" ) {
-      p <- p + coord_flip()
-    }
-    
-    p <- p +
-      ylab(phenoToLabel(phenotype)) +
-      ggtitle("Mean Proportion Across Cytokines")
-    
-    plot(p)
-    
-  })
-  
-  ## boxplot by cytokine
-  output$boxplot_by_cytokine <- renderPlot({
-    
-    facet1 <- getFacet1()
-    facet2 <- getFacet2()
-    #plot_type <- getPlotType()
-    heatmap_level <- getHeatmapLevel()
-    cytokines <- getCytokines()
-    cytokine_filter <- getCytokineFilter()
-    cytokine_order <- getCytokineOrder()
-    phenotype <- getPhenotype()
-    filter1 <- getFilter1()
-    filter1_cb <- getFilter1Cb()
-    custom_filter <- getCustomFilter()
-    
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order)
-    d <- customFilter(d, custom_filter)
-    d <- filter1(d, filter1, filter1_cb)
-    
-    if( facet1 == "Original Ordering" ) {
-      plot( 1 ~ 1, type='n', axes=FALSE, frame.plot=FALSE, ann=FALSE)
-      text( x=1, y=1, labels="Select a Facet to view Boxplots of Proportions by Cytokine")
-      return(NULL)
-    }
-    
-    p <- ggplot(d) +
-      theme( axis.text.x = element_text(angle=45, hjust=1) )
-    
-    ## what kind of plot to generate?
-    if( facet2 == "None" ) {
+    output$boxplot <- renderPlot({
+      
+      if( facet1 == "Original Ordering" ) {
+        plot( 1 ~ 1, type='n', axes=FALSE, frame.plot=FALSE, ann=FALSE)
+        text( x=1, y=1, labels="Select a Facet to view Boxplots of Proportions")
+        return(NULL)
+      }
+      
+      p <- ggplot(d) +
+        theme( axis.text.x = element_text(angle=45, hjust=1) )
+      
+      if( facet2 != "None" ) {
+        p <- p + facet_grid( paste(". ~", facet2) )
+      }
+      
+      ## what kind of plot to generate?
       p <- p + switch(plot_type,
         boxplot=geom_boxplot( aes_string(x=facet1, y=phenotype) ),
         histogram=geom_histogram( aes_string(x=phenotype, fill=facet1), alpha=0.5, position="identity" ),
         density=geom_density( aes_string(x=phenotype, fill=facet1), alpha=0.5 )
       )
-    } else {
-      p <- p + switch(plot_type,
-        boxplot=geom_boxplot( aes_string(x=facet2, y=phenotype, fill=facet1) ),
-        histogram=geom_histogram( aes_string(x=phenotype, fill=facet1), alpha=0.5, position="identity" ),
-        density=geom_density( aes_string(x=phenotype, fill=facet1), alpha=0.5 )
-      )
-    }
-    
-    if( plot_type == "boxplot" ) {
+      
+      if( plot_type == "boxplot" ) {
+        p <- p + coord_flip()
+      }
+      
       p <- p +
-        ylab( phenoToLabel(phenotype) ) +
-        facet_grid(". ~ Cytokine") +
-        coord_flip()
-    } else {
-      p <- p +
-        xlab( phenoToLabel(phenotype) ) +
-        facet_grid( paste(facet2, "~", "Cytokine") )
-    }
+        ylab(phenoToLabel(phenotype)) +
+        ggtitle("Mean Proportion Across Cytokines")
+      
+      plot(p)
+      
+    })
     
-    plot(p)
+    ## boxplot by cytokine
+    output$boxplot_by_cytokine <- renderPlot({
+      
+      if( facet1 == "Original Ordering" ) {
+        plot( 1 ~ 1, type='n', axes=FALSE, frame.plot=FALSE, ann=FALSE)
+        text( x=1, y=1, labels="Select a Facet to view Boxplots of Proportions by Cytokine")
+        return(NULL)
+      }
+      
+      p <- ggplot(d) +
+        theme( axis.text.x = element_text(angle=45, hjust=1) )
+      
+      ## what kind of plot to generate?
+      if( facet2 == "None" ) {
+        p <- p + switch(plot_type,
+          boxplot=geom_boxplot( aes_string(x=facet1, y=phenotype) ),
+          histogram=geom_histogram( aes_string(x=phenotype, fill=facet1), alpha=0.5, position="identity" ),
+          density=geom_density( aes_string(x=phenotype, fill=facet1), alpha=0.5 )
+        )
+      } else {
+        p <- p + switch(plot_type,
+          boxplot=geom_boxplot( aes_string(x=facet2, y=phenotype, fill=facet1) ),
+          histogram=geom_histogram( aes_string(x=phenotype, fill=facet1), alpha=0.5, position="identity" ),
+          density=geom_density( aes_string(x=phenotype, fill=facet1), alpha=0.5 )
+        )
+      }
+      
+      if( plot_type == "boxplot" ) {
+        p <- p +
+          ylab( phenoToLabel(phenotype) ) +
+          facet_grid(". ~ Cytokine") +
+          coord_flip()
+      } else {
+        p <- p +
+          xlab( phenoToLabel(phenotype) ) +
+          facet_grid( paste(facet2, "~", "Cytokine") )
+      }
+      
+      plot(p)
+      
+    })
     
-  })
-  
-  ## stats
-  output$stats <- renderTable({
+    output$stats <- renderTable({
+      
+      if( facet1 == "Original Ordering" ) {
+        split_var <- d$Cytokine
+      } else {
+        split_var <- paste( d$Cytokine, d[[facet1]], sep=' x ' )
+      }
+      
+      m <- do.call( rbind, lapply( split(d, split_var), function(DF) {
+        return( summary( DF[[phenotype]] ) )
+      } ) )
+      
+      return( as.data.frame(m) )
+      
+    })
     
-    facet1 <- getFacet1()
-    facet2 <- getFacet2()
-    #plot_type <- getPlotType()
-    heatmap_level <- getHeatmapLevel()
-    cytokines <- getCytokines()
-    cytokine_filter <- getCytokineFilter()
-    cytokine_order <- getCytokineOrder()
-    phenotype <- getPhenotype()
-    filter1 <- getFilter1()
-    filter1_cb <- getFilter1Cb()
-    custom_filter <- getCustomFilter()
-    
-    d <- droplevels( filter_cytokines(d, cytokines, cytokine_filter, cytokine_order) )
-    d <- customFilter(d, custom_filter)
-    d <- filter1(d, filter1, filter1_cb)
-    
-    if( facet1 == "Original Ordering" ) {
-      split_var <- d$Cytokine
-    } else {
-      split_var <- paste( d$Cytokine, d[[facet1]], sep=' x ' )
-    }
-    
-    m <- do.call( rbind, lapply( split(d, split_var), function(DF) {
-      return( summary( DF[[phenotype]] ) )
-    } ) )
-    
-    return( as.data.frame(m) )
+    output$rchart <- renderChart({
+      
+      p <- rPlot( "Cytokine", phenotype, data=d, color=facet1, facet=facet2, type='point' )
+      p$addParams(dom="rchart", width=430, height=300)
+      return(p)
+      
+    })
     
   })
   
 })
+

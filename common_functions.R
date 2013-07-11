@@ -1,3 +1,4 @@
+library(testthat)
 ## functions common to one or more of 'preprocess.R', 'ui.R', 'server.R'
 
 ## get combinations up to an order n

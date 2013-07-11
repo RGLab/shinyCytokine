@@ -1,3 +1,4 @@
+library(rCharts)
 library(shinyGridster)
 
 meta <- readRDS("data/meta.rds")
@@ -197,12 +198,18 @@ shinyUI( bootstrapPage(
     
     gridItem(row=3, col=1, sizex=3, sizey=2,
       plotOutput("boxplot_by_cytokine", width=width*3, height=height*2)
-    ),
-    
-    gridItem(row=4, col=1, sizex=3, sizey=2,
-      h2("Summary Statistics"),
-      tableOutput("stats")
     )
+    
+#     gridItem(row=4, col=1, sizex=3, sizey=2,
+#       h2("Summary Statistics"),
+#       tableOutput("stats")
+#     ),
+    
+#     gridItem(row=5, col=1, sizex=1, sizey=1,
+#       tags$div( style=paste("width:", width, "; height:", height),
+#         showOutput("rchart", "polycharts")
+#       )
+#     )
     
     #     gridItem(row=4, col=1, sizex=3, sizey=1,
     #       verbatimTextOutput("debug")
