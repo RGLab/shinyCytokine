@@ -102,6 +102,10 @@ preprocess <- function(dat, meta, name) {
     variable.name="Cytokine"
   )
   
+  ## cytokine order
+  dat_prop_melt$Cytokine_order <- 
+    str_count( dat_prop_melt$Cytokine, " x " ) + 1L
+  
   ## more informative name for the samples
   names(dat_prop_melt)[ names(dat_prop_melt) == "name" ] <- "Sample"
   

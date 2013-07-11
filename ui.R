@@ -1,4 +1,4 @@
-library(rCharts)
+#library(rCharts)
 library(shinyGridster)
 
 meta <- readRDS("data/meta.rds")
@@ -35,6 +35,15 @@ shinyUI( bootstrapPage(
   ## checkboxes in a div line up side by side
   tags$head( tags$style( type="text/css","
 
+    .gridster {
+      width: 1400px;
+      margin: 0 auto;
+    }
+
+    .gridster > * {
+      margin: 0 auto;
+    }
+
     #cytokines {
       overflow: auto;
     }
@@ -64,6 +73,7 @@ shinyUI( bootstrapPage(
   singleton( tags$body( style="background-color: #789;" ) ),
   
   h1(style="text-align: center; color: white", "Cytokine Visualization"),
+  
   gridster( width=width, height=height,
     
     gridItem( row=1, col=1, sizex=1, sizey=2,
@@ -154,14 +164,14 @@ shinyUI( bootstrapPage(
       ),
       
       #h3("Plot Type"),
-#       selectInput("plot_type",
-#         label="Plot Type",
-#         choices=list(
-#           `Boxplots`="boxplot",
-#           `Histograms`="histogram",
-#           `Density Plots`="density"
-#         )
-#       ),
+      #       selectInput("plot_type",
+      #         label="Plot Type",
+      #         choices=list(
+      #           `Boxplots`="boxplot",
+      #           `Histograms`="histogram",
+      #           `Density Plots`="density"
+      #         )
+      #       ),
       
       selectInput("filter1",
         label="Filter 1",
@@ -193,23 +203,25 @@ shinyUI( bootstrapPage(
     ),
     
     gridItem(row=2, col=3, sizex=1, sizey=1,
-      plotOutput("boxplot", width=width, height=height)
+      plotOutput("dofplot", width=width, height=height)
     ),
     
     gridItem(row=3, col=1, sizex=3, sizey=2,
       plotOutput("boxplot_by_cytokine", width=width*3, height=height*2)
+    ),
+    
+    gridItem(row=4, col=1, sizex=3, sizey=2,
+      tags$div( style="overflow: auto; width: 1290px; height: 600px;",
+        h2("Summary Statistics"),
+        tableOutput("stats")
+      )
     )
     
-#     gridItem(row=4, col=1, sizex=3, sizey=2,
-#       h2("Summary Statistics"),
-#       tableOutput("stats")
-#     ),
-    
-#     gridItem(row=5, col=1, sizex=1, sizey=1,
-#       tags$div( style=paste("width:", width, "; height:", height),
-#         showOutput("rchart", "polycharts")
-#       )
-#     )
+    #     gridItem(row=5, col=1, sizex=1, sizey=1,
+    #       tags$div( style=paste("width:", width, "; height:", height),
+    #         showOutput("rchart", "polycharts")
+    #       )
+    #     )
     
     #     gridItem(row=4, col=1, sizex=3, sizey=1,
     #       verbatimTextOutput("debug")
