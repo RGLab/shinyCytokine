@@ -2,7 +2,7 @@
 library(shinyGridster)
 
 meta <- readRDS("data/meta.rds")
-dat <- readRDS("data/res_cd8.rds")
+dat <- readRDS("data/res_cd4.rds")
 
 ## width, height for gridster + plot elements
 width <- 430
@@ -18,57 +18,10 @@ svgOutput <- function(outputId, width, height) {
 ## ensure that each matrix has the same column names
 stopifnot( length( table( table( unlist( lapply( dat, names ) ) ) ) ) != 1 )
 
-## custom gridster item
-gridItem <- function(..., col=NULL, row=NULL, sizex=NULL, sizey=NULL) {
-  return( gridsterItem(...,
-    style="border-radius: 10px;",
-    row=row,
-    col=col,
-    sizex=sizex,
-    sizey=sizey
-  ) )
-}
-
 shinyUI( bootstrapPage(
   
-  ## note: 'overflow: auto;' is used as a cheap way to get the
-  ## checkboxes in a div line up side by side
-  tags$head( tags$style( type="text/css","
-
-    .gridster {
-      width: 1400px;
-      margin: 0 auto;
-    }
-
-    .gridster > * {
-      margin: 0 auto;
-    }
-
-    #cytokines {
-      overflow: auto;
-    }
-
-    #cytokines .checkbox {
-      float: left;
-      margin: 5px;
-    }
-
-    #facet1 {
-      width: 100%;
-    }
-
-    #facet2 {
-      width: 100%;
-    }
-
-    #phenotype {
-      width: 100%;
-    }
-
-    #individual {
-      width: 100%;
-    }
-    ")),
+  includeCSS("www/css/styles.css"),
+  includeScript("www/js/fancyboxify.js"),
   
   singleton( tags$body( style="background-color: #789;" ) ),
   
@@ -76,22 +29,22 @@ shinyUI( bootstrapPage(
   
   gridster( width=width, height=height,
     
-    gridItem( row=1, col=1, sizex=1, sizey=2,
+    gridsterItem( row=1, col=1, sizex=1, sizey=2,
       
-      tags$div( style="overflow: auto;",
+      tags$div( style="overflow: auto; width: 100%;",
         
-        tags$div( style="width: 45%; float: left;",
+        tags$div( style="float: left; width: 45%;",
           selectInput("phenotype", label="Phenotype", choices=list(
             `Proportion`="Proportion",
             `Proportion (BG Corrected)`="Proportion_bg"
           ))
         ),
         
-        tags$div( style="width: 45%; float: right;", 
-          selectInput("individual",
-            label="Individual",
-            choices=sort(unique(as.character(meta$PTID)))
-          )
+        tags$div( style="float: left; margin-left: 10px; width: 45%;",
+          selectInput("marginal", label="Distribution", choices=list(
+            Marginal=TRUE,
+            Joint=FALSE
+          ))
         )
         
       ),
@@ -194,36 +147,76 @@ shinyUI( bootstrapPage(
       
     ),
     
-    gridItem(row=1, col=2, sizex=1, sizey=2,
-      plotOutput("heatmap", width=width, height=height*2, clickId="heatmap_click", hoverId="heatmap_hover")
+    gridsterItem(row=1, col=2, sizex=1, sizey=2,
+      h4( style="text-align: center;",
+        "Cytokine Proportion by Sample"
+      ),
+      plotOutput("heatmap", width=width, height=height*2-25),
+      checkboxInput("flip_heatmap", "Flip Axes?", value=FALSE)
     ),
     
-    gridItem(row=1, col=3, sizex=1, sizey=1,
-      plotOutput("linechart", width=width, height=height)
+    gridsterItem(row=1, col=3, sizex=1, sizey=1,
+      tags$div(
+        selectInput("individual",
+          label="Individual",
+          choices=sort(unique(as.character(meta$PTID)))
+        ),
+        plotOutput("linechart", width=width, height=height-85),
+        checkboxInput("flip_linechart", "Flip Axes?", value=FALSE)
+      )
     ),
     
-    gridItem(row=2, col=3, sizex=1, sizey=1,
+    gridsterItem(row=2, col=3, sizex=1, sizey=1,
+      #       selectInput("sample",
+      #         label="Sample",
+      #         choices=unique(as.character(meta$name))
+      #       ),
       plotOutput("dofplot", width=width, height=height)
     ),
     
-    gridItem(row=3, col=1, sizex=3, sizey=2,
-      plotOutput("boxplot_by_cytokine", width=width*3, height=height*2)
+    gridsterItem(row=3, col=1, sizex=3, sizey=2,
+      ## custom plot output -- set style manually
+      tags$div( style=paste0(
+        "width: ", width*3, "px; ",
+        "height: ", height*2, "px; "
+      ),
+        tags$div( id="boxplot_by_cytokine", class="shiny-plot-output",
+          style=paste0(
+            "width: ", width*3, "px; ",
+            "height: ", height*2-30, "px; ",
+            "margin: 0 auto;"
+          )
+        ),
+        tags$div( style="overflow: auto;",
+          tags$div( style="float: left; display: inline-block;", 
+            selectInput("boxplot_by_cytokine_orientation", 
+              label="Boxplot Orientation",
+              choices=c("Horizontal", "Vertical")
+            )
+          ),
+          tags$div( style="float: right; display: inline-block; margin-top: 20px;",
+            checkboxInput("boxplot_coord_flip",
+              label="Flip Axes?"
+            )
+          )
+        )
+      )
     ),
     
-    gridItem(row=4, col=1, sizex=3, sizey=2,
+    gridsterItem(row=4, col=1, sizex=3, sizey=2,
       tags$div( style="overflow: auto; width: 1290px; height: 600px;",
         h2("Summary Statistics"),
         tableOutput("stats")
       )
     )
     
-    #     gridItem(row=5, col=1, sizex=1, sizey=1,
+    #     gridsterItem(row=5, col=1, sizex=1, sizey=1,
     #       tags$div( style=paste("width:", width, "; height:", height),
     #         showOutput("rchart", "polycharts")
     #       )
     #     )
     
-    #     gridItem(row=4, col=1, sizex=3, sizey=1,
+    #     gridsterItem(row=4, col=1, sizex=3, sizey=1,
     #       verbatimTextOutput("debug")
     #     )
     

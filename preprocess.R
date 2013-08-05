@@ -8,10 +8,15 @@ library(plyr)
 
 source("common_functions.R")
 
-preprocess <- function(dat, meta, name) {
+## debug
+dat_file <- "data/res_cd4.rds"
+meta_file <- "data/meta.rds"
+name <- "cd4"
+
+preprocess <- function(dat_file, meta_file, name) {
   
-  dat <- readRDS(dat)
-  meta <- readRDS(meta)
+  dat <- readRDS(dat_file)
+  meta <- readRDS(meta_file)
   
   stopifnot( all( names(dat) == meta$name ) )
   
@@ -29,20 +34,15 @@ preprocess <- function(dat, meta, name) {
   dat <- dat[ non_null_cases ]
   meta <- droplevels(meta[ non_null_cases, ])
   
-  ## confirm that each cell (row) in the data expresses at least one cytokine
-  stopifnot( !any( sapply( dat, function(x) {
-    any( apply( x, 1, function(xx) {
-      all( xx == 0 )
-    }))
-  })) )
+  ## ensure each entry is a matrix
+  stopifnot( identical( names( counts( sapply( dat, class ) ) ), "matrix" ) )
   
-  ## translate to binary data
-  ## not necessary
-  # dat <- lapply(dat, function(x) {
-  #   return( colApply(x, function(xx) {
-  #     return( xx > 0 )
-  #   }))
-  # })
+  ## find negatives
+  stopifnot(
+    all( sapply(dat, function(x) {
+      all( x >= 0 )
+    }))
+  )
   
   ## generate all possible permutations
   cytokines <- unname( unclass( colnames( dat[[1]] ) ) )
@@ -50,6 +50,11 @@ preprocess <- function(dat, meta, name) {
   combos <- combinations( 1:length(cytokines) )
   ncol <- sum( choose( length(cytokines), 1:length(cytokines) ) )
   colnames <- combinations(cytokines)
+  
+  ## re-order each matrix to be the same column order
+  dat[] <- lapply(dat, function(x) {
+    x[, cytokines, drop=FALSE]
+  })
   
   ## test all the names
   tmp <- unlist( colnames[1:6] )
@@ -91,20 +96,30 @@ preprocess <- function(dat, meta, name) {
   
   overall_sample_prop <- rowMeans(d_prop)
   
+  ## compute the 'degree of functionality'
+  ## for each cell, we compute the number of cytokines
+  ## that have been expressed simultaneously
+  ## we then collapse over all cells in a sample
+  dof <- sapply(dat, function(x) {
+    rowSums(x > 0)
+  })
+  
+  stopifnot( all( names(dof) == meta$name ) )
+  
   ## merge the data sets together
   merged <- cbind(d_prop, meta)
   
   ## melt for ggplot2 usage
   dat_prop_melt <- melt(
     merged, 
-    id.vars=names(meta), 
+    id.vars=names(meta),
     value.name="Proportion", 
     variable.name="Cytokine"
   )
   
   ## cytokine order
   dat_prop_melt$Cytokine_order <- 
-    str_count( dat_prop_melt$Cytokine, " x " ) + 1L
+    stringr::str_count( dat_prop_melt$Cytokine, " x " ) + 1L
   
   ## more informative name for the samples
   names(dat_prop_melt)[ names(dat_prop_melt) == "name" ] <- "Sample"
@@ -123,10 +138,12 @@ preprocess <- function(dat, meta, name) {
     return(DF)
   })
   
+  ## FIXME: Add / remove negctrl?
   ## remove sebctrl, negctrl
-  d2 <- droplevels( d_bg[
-    d_bg$Stim %nin% grep("ctrl", unique(d_bg$Stim), value=TRUE),
-    ])
+#   d2 <- droplevels( d_bg[
+#     d_bg$Stim %nin% grep("ctrl", unique(d_bg$Stim), value=TRUE),
+#   ])
+  d2 <- d_bg
   
   ## an individual-level data set
   d <- data.table(dat_prop_melt)
@@ -137,13 +154,14 @@ preprocess <- function(dat, meta, name) {
   
   ## write the files out
   dir.create( paste0("data/", name), showWarnings=FALSE )
-  saveRDS( dat_prop_melt, file=paste0("data/", name, "/sample_proportions_postProcess.rds") )
-  saveRDS( d, file=paste0("data/", name, "/indiv_proportions_postProcess.rds") )
-  saveRDS( d2, file=paste0("data/", name, "/sample_proportions_bg_substracted.rds") )
+  saveRDS( dat_prop_melt, file=paste0("data/", name, "/sample_proportions_postProcess_marginal.rds") )
+  saveRDS( d, file=paste0("data/", name, "/indiv_proportions_postProcess_marginal.rds") )
+  saveRDS( d2, file=paste0("data/", name, "/sample_proportions_bg_subtracted_marginal.rds") )
+  saveRDS( dof, file=paste0("data/", name, "/cell_dof_marginal.rds") )
   dat <- dat_prop_melt[ dat_prop_melt$Cytokine %in% cytokines, ]
-  saveRDS( dat, file=paste0("data/", name, "/sample_proportions_postProcess_noCombo.rds") )
+  saveRDS( dat, file=paste0("data/", name, "/sample_proportions_postProcess_noCombo_marginal.rds") )
   
 }
 
-preprocess("data/res.rds", "data/meta.rds", "cd4")
+preprocess("data/res_cd4.rds", "data/meta.rds", "cd4")
 preprocess("data/res_cd8.rds", "data/meta.rds", "cd8")

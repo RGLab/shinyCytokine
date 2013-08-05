@@ -1,0 +1,60 @@
+.gridster {
+  width: 1400px;
+  margin: 0 auto;
+}
+
+.gridster ul li {
+  background-color: #FAFAFF !important;
+  border-radius: 10px;
+}
+
+.blur {
+  opacity: 0.25;
+}
+
+.gridster > * {
+  margin: 0 auto;
+}
+
+#cytokines {
+  overflow: auto;
+}
+
+#cytokines .checkbox {
+  float: left;
+  margin: 5px;
+}
+
+#facet1 {
+  width: 100%;
+}
+
+#facet2 {
+  width: 100%;
+}
+
+#phenotype {
+  width: 100%;
+}
+
+#individual {
+  width: 100%;
+}
+
+.fancybox {
+    position: fixed;
+    left: 0px;
+    top: 0px;
+    width: 400px;
+    height: 300px;
+    border-radius: 10px;
+    background-color: white;
+}
+
+table.data {
+  background-color: white;
+}
+
+div.controls  > * {
+  float: left;
+}
