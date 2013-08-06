@@ -11,12 +11,24 @@ source("common_functions.R")
 ## debug
 dat_file <- "data/res_cd4.rds"
 meta_file <- "data/meta.rds"
-name <- "cd4"
+counts_file <- "data/cd4_counts.rds"
+name <- "cd4_joint"
+generate_proportions <- joint
 
-preprocess <- function(dat_file, meta_file, name) {
+preprocess <- function(dat_file, meta_file, counts_file, name, generate_proportions) {
+  
+  generate_proportions <- match.fun(generate_proportions)
   
   dat <- readRDS(dat_file)
   meta <- readRDS(meta_file)
+  counts <- readRDS(counts_file)
+  
+  ## remove FCS files with abnormally low cell counts
+  low_cell_counts <- names(counts)[ counts < 1E4 ]
+  
+  dat <- dat[ names(dat) %nin% low_cell_counts ]
+  meta <- droplevels(meta[ meta$name %nin% low_cell_counts, ])
+  counts <- counts[ names(counts) %nin% low_cell_counts ]
   
   stopifnot( all( names(dat) == meta$name ) )
   
@@ -33,6 +45,9 @@ preprocess <- function(dat_file, meta_file, name) {
   
   dat <- dat[ non_null_cases ]
   meta <- droplevels(meta[ non_null_cases, ])
+  counts <- counts[ non_null_cases ]
+  
+  stopifnot( all( names(dat) == names(counts) ) )
   
   ## ensure each entry is a matrix
   stopifnot( identical( names( counts( sapply( dat, class ) ) ), "matrix" ) )
@@ -73,26 +88,19 @@ preprocess <- function(dat_file, meta_file, name) {
   colnames <- sapply(colnames, paste, collapse=" x ")
   
   ## generate proportions for all cytokine combinations
-  ## first, generate raw TRUE/FALSE entries for each cell
-  ## in each sample; TRUE if all cytokines of a particular combo are TRUE,
-  ## FALSE if all cytokines of a particular combo are FALSE
-  d <- vector("list", length(dat))
-  for( i in 1:length(dat) ) {
-    x <- dat[[i]]
-    output <- matrix(FALSE, nrow=nrow(x), ncol=ncol)
-    for( j in 1:ncol(output) ) {
-      output[, j] <- as.logical(apply( x[, combos[[j]], drop=FALSE], 1, prod))
-    }
-    colnames(output) <- colnames
-    d[[i]] <- output
-  }
+  d <- generate_proportions(dat, combos, ncol, colnames)
   
   ## compute proportions
+  ## use the total counts to compute proportions
   d_prop <- do.call( rbind, 
     lapply(d, function(x) {
-      colApply(x, mean)
+      colApply(x, sum)
     })
   )
+  
+  for (i in 1:nrow(d_prop)) {
+    d_prop[i,] <- d_prop[i,] / counts[i]
+  }
   
   overall_sample_prop <- rowMeans(d_prop)
   
@@ -145,23 +153,36 @@ preprocess <- function(dat_file, meta_file, name) {
 #   ])
   d2 <- d_bg
   
-  ## an individual-level data set
-  d <- data.table(dat_prop_melt)
-  del(d, VISITNO, Stim, Sample)
-  setkeyv(d, c("PTID", "Cytokine"))
-  d <- d[, Proportion := mean(Proportion), by=list(PTID, Cytokine)]
-  d <- group_subset(d, by=list(PTID, Cytokine))
+  ## add logged proportions
+  d2$Proportion_log10 <- -log10(d2$Proportion)
+  d2$Proportion_bg_log10 <- -log10(d2$Proportion_bg)
   
+  ## arcsinh sqrt transformation
+  d2$Proportion_arcsinh <- asinh( sqrt( d2$Proportion ) )
+  d2$Proportion_bg_arcsinh <- asinh( sqrt( d2$Proportion_bg ) )
+  
+  ## an individual-level data set
+#   d <- data.table(dat_prop_melt)
+#   del(d, VISITNO, Stim, Sample)
+#   setkeyv(d, c("PTID", "Cytokine"))
+#   d <- d[, Proportion := mean(Proportion), by=list(PTID, Cytokine)]
+#   d <- group_subset(d, by=list(PTID, Cytokine))
+#   
   ## write the files out
   dir.create( paste0("data/", name), showWarnings=FALSE )
-  saveRDS( dat_prop_melt, file=paste0("data/", name, "/sample_proportions_postProcess_marginal.rds") )
-  saveRDS( d, file=paste0("data/", name, "/indiv_proportions_postProcess_marginal.rds") )
-  saveRDS( d2, file=paste0("data/", name, "/sample_proportions_bg_subtracted_marginal.rds") )
-  saveRDS( dof, file=paste0("data/", name, "/cell_dof_marginal.rds") )
-  dat <- dat_prop_melt[ dat_prop_melt$Cytokine %in% cytokines, ]
-  saveRDS( dat, file=paste0("data/", name, "/sample_proportions_postProcess_noCombo_marginal.rds") )
+  ## saveRDS( dat_prop_melt, file=paste0("data/", name, "/sample_proportions_postProcess.rds") )
+  ## saveRDS( d, file=paste0("data/", name, "/indiv_proportions_postProcess.rds") )
+  saveRDS( d2, file=paste0("data/", name, "/", name, "_sample_proportions_bg_subtracted.rds") )
+  ## saveRDS( dof, file=paste0("data/", name, "/cell_dof_marginal.rds") )
+  ## dat <- dat_prop_melt[ dat_prop_melt$Cytokine %in% cytokines, ]
+  ## saveRDS( dat, file=paste0("data/", name, "/sample_proportions_postProcess_noCombo_marginal.rds") )
   
 }
 
-preprocess("data/res_cd4.rds", "data/meta.rds", "cd4")
-preprocess("data/res_cd8.rds", "data/meta.rds", "cd8")
+## CD4
+preprocess("data/res_cd4.rds", "data/meta.rds", "data/cd4_counts.rds", "cd4_marginal", marginal)
+preprocess("data/res_cd4.rds", "data/meta.rds", "data/cd4_counts.rds", "cd4_joint", joint)
+
+## CD8
+preprocess("data/res_cd8.rds", "data/meta.rds", "data/cd8_counts.rds", "cd8_marginal", marginal)
+preprocess("data/res_cd8.rds", "data/meta.rds", "data/cd8_counts.rds", "cd8_joint", joint)

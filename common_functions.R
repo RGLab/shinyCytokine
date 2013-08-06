@@ -15,7 +15,42 @@ combinations <- function(x, combine=c, ...) {
   return( unlist(output, recursive=FALSE) )
 }
 
-expect_identical( 
-  unlist( combinations(1:6)[1:6] ),
-  1:6
-)
+stopifnot( identical( unlist( combinations(1:6)[1:6] ), 1:6 ) )
+
+## for computing cytokine combinations
+marginal <- function(dat, combos, ncol, colnames) {
+  d <- vector("list", length(dat))
+  for( i in 1:length(dat) ) {
+    x <- dat[[i]]
+    output <- matrix(FALSE, nrow=nrow(x), ncol=ncol)
+    for( j in 1:ncol(output) ) {
+      output[, j] <- as.logical(apply( x[, combos[[j]], drop=FALSE], 1, prod))
+    }
+    colnames(output) <- colnames
+    d[[i]] <- output
+  }
+  return(d)
+}
+
+joint <- function(dat, combos, ncol, colnames) {
+  
+  ## convert dat to binary
+  dat[] <- lapply(dat, function(x) {
+    colApply(x, as.logical, drop=FALSE)
+  })
+  
+  d <- vector("list", length(dat))
+  for( i in 1:length(dat) ) {
+    ## cat(i, "\n")
+    x <- dat[[i]]
+    output <- matrix(FALSE, nrow=nrow(x), ncol=ncol)
+    for( j in 1:ncol(output) ) {
+      check <- rep(FALSE, ncol(x))
+      check[ combos[[j]] ] <- TRUE
+      output[, j] <- apply(x, 1, function(x) { all(x == check) })
+    }
+    colnames(output) <- colnames
+    d[[i]] <- output
+  }
+  return(d)
+}

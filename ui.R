@@ -3,6 +3,7 @@ library(shinyGridster)
 
 meta <- readRDS("data/meta.rds")
 dat <- readRDS("data/res_cd4.rds")
+dat_post <- readRDS("data/cd4_marginal//cd4_marginal_sample_proportions_bg_subtracted.rds")
 
 ## width, height for gridster + plot elements
 width <- 430
@@ -10,7 +11,7 @@ height <- 300
 
 ## svg output
 svgOutput <- function(outputId, width, height) {
-  div(
+  tags$div(
     tag("svg", list(id=outputId, width=width, height=height, class="html-shiny-output"))
   )
 }
@@ -36,7 +37,11 @@ shinyUI( bootstrapPage(
         tags$div( style="float: left; width: 45%;",
           selectInput("phenotype", label="Phenotype", choices=list(
             `Proportion`="Proportion",
-            `Proportion (BG Corrected)`="Proportion_bg"
+            `Proportion (log10 transformed)`="Proportion_log10",
+            `Proportion (arc-sine transformed)`="Proportion_arcsinh",
+            `Proportion (BG Corrected)`="Proportion_bg",
+            `Proportion (BG Corrected, log10 transformed)`="Proportion_bg_log10",
+            `Proportion (BG Corrected, arc-sine transformed)`="Proportion_bg_arcsinh"
           ))
         ),
         
@@ -79,9 +84,9 @@ shinyUI( bootstrapPage(
       sliderInput("cytokine_filter",
         label="Remove Cytokine Combinations with p < x",
         min=0,
-        max=0.2,
-        value=0.05,
-        step=0.001
+        max=0.01,
+        value=1E-4,
+        step=1E-6
       ),
       
       ## overflow: auto keeps div from collapsing to zero height
@@ -103,14 +108,14 @@ shinyUI( bootstrapPage(
         tags$div( style="width: 45%; float: left;",
           selectInput("facet1",
             label="Facet 1",
-            choices=c("Original Ordering", names(meta))
+            choices=c("Original Ordering", gsub("name", "Sample", names(meta)))
           )
         ),
         
         tags$div( style="width: 45%; float: right;",
           selectInput("facet2",
             label="Facet 2",
-            choices=c("None", names(meta))
+            choices=c("None", gsub("name", "Sample", names(meta)))
           )
         )
         
@@ -192,6 +197,17 @@ shinyUI( bootstrapPage(
             selectInput("boxplot_by_cytokine_orientation", 
               label="Boxplot Orientation",
               choices=c("Horizontal", "Vertical")
+            )
+          ),
+          tags$div( style="float: left; display: inline-block; margin-left: 20px;",
+            checkboxInput("boxplot_manual_limits", "Set Limits Manually?", FALSE)
+          ),
+          conditionalPanel("input.boxplot_manual_limits === true",
+            tags$div( style="float: left; display: inline-block; margin-left: 20px;",
+              numericInput("boxplot_lower_limit", "Lower Limit", 0)
+            ),
+            tags$div( style="float: left; display: inline-block; margin-left: 20px;",
+              numericInput("boxplot_upper_limit", "Upper Limit", 1)
             )
           ),
           tags$div( style="float: right; display: inline-block; margin-top: 20px;",

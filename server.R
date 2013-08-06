@@ -10,8 +10,8 @@ library(stringr)
 
 CELL_DATA <- "data/res_cd4.rds"
 COUNTS <- "data/cd4_counts.rds"
-DATA <- "data/cd4/sample_proportions_bg_subtracted.rds"
-DATA_MARGINAL <- "data/cd4/sample_proportions_bg_subtracted_marginal.rds"
+DATA <- "data/cd4_joint/cd4_joint_sample_proportions_bg_subtracted.rds"
+DATA_MARGINAL <- "data/cd4_marginal/cd4_marginal_sample_proportions_bg_subtracted.rds"
 META <- "data/meta.rds"
 
 source("common_functions.R")
@@ -25,6 +25,15 @@ data_marginal <- readRDS(DATA_MARGINAL)
 l <- levels( d$Cytokine )
 orig_cytokines <- strsplit( l[ length(l) ], " x ", fixed=TRUE)[[1]]
 meta <- readRDS(META)
+counts <- readRDS(COUNTS)
+cell_counts <- data.frame(
+  Sample=names(counts),
+  counts=counts
+)
+
+## FIXME: remove sebctrl, negctrl
+d <- dat <- dat[ dat$Stim %nin% c("sebctrl", "negctrl 1", "negctrl 2"), ]
+data_marginal <- data_marginal[ data_marginal$Stim %nin% c("sebctrl", "negctrl 1", "negctrl 2"), ]
 
 ## TODO: allow other plot types
 plot_type <- "boxplot"
@@ -33,7 +42,9 @@ plot_type <- "boxplot"
 phenoToLabel <- function(x) {
   return( switch(x,
     `Proportion`="Proportion",
-    `Proportion_bg`="Proportion\n(BG Corrected)"
+    `Proportion_bg`="Proportion\n(BG Corrected)",
+    `Proportion_log10`="Proportion\n(log10 transformed)",
+    `Proportion_bg_log10`="Proportion\n(BG corrected, log10 transformed)"
   ) )
 }
 
@@ -183,6 +194,18 @@ shinyServer( function(input, output, session) {
     return( input$boxplot_coord_flip )
   })
   
+  getBoxplotManualLimits <- reactive({
+    return( input$boxplot_manual_limits )
+  })
+  
+  getBoxplotLowerLimit <- reactive({
+    return( input$boxplot_lower_limit )
+  })
+  
+  getBoxplotUpperLimit <- reactive({
+    return( input$boxplot_upper_limit )
+  })
+  
   ## observers
   observe({
     x <- input$individual
@@ -194,12 +217,25 @@ shinyServer( function(input, output, session) {
   })
   
   observe({
-    x <- input$heatmap_level
-    updateSliderInput(session, 
-      "proportion_filter", 
-      label=paste("Remove", x, "with proportion < x")
-    )
+    x <- input$boxplot_manual_limits
+    updateNumericInput(session, "boxplot_lower_limit", value=0)
+    updateNumericInput(session, "boxplot_upper_limit", value=0.005)
   })
+  
+  ## if the phenotype is changed, make sure the 'set limits manually'
+  ## thing gets unchecked
+  observe({
+    x <- input$phenotype
+    updateCheckboxInput(session, "boxplot_manual_limits", value=FALSE)
+  })
+  
+#   observe({
+#     x <- input$heatmap_level
+#     updateSliderInput(session, 
+#       "proportion_filter", 
+#       label=paste("Remove", x, "with proportion < x")
+#     )
+#   })
   
   ## an observer for conditionally updating the filter widget,
   ## depending on the type of variable being used
@@ -260,7 +296,13 @@ shinyServer( function(input, output, session) {
     
     p1 <- ggplot( d, aes_string(x="Cytokine", y=y_var, fill=phenotype)) +
       geom_tile() +
-      scale_fill_gradient(low="white", high="steelblue", name=phenoToLabel(phenotype)) +
+      scale_fill_gradient(
+        low="white", 
+        high="steelblue", 
+        name=phenoToLabel(phenotype),
+        trans="log10",
+        na.value="white"
+      ) +
       scale_x_discrete(expand=c(0,0)) +
       scale_y_discrete(expand=c(0,0), breaks=NULL) +
       xlab("Cytokine") +
@@ -394,6 +436,10 @@ shinyServer( function(input, output, session) {
       rowSums(x > 0)
     }) )
     
+    ## merge in cell counts
+    samples_dof <- merge( samples_dof, cell_counts, by.x="ind", by.y="Sample" )
+    
+    ## merge in meta-info
     samples_dof <- merge( 
       samples_dof, 
       d[ names(d) %in% c("Sample", names(meta)) ], 
@@ -447,6 +493,9 @@ shinyServer( function(input, output, session) {
     marginal <- isMarginal()
     boxplot_orientation <- getBoxplotOrientation()
     boxplot_coord_flip <- getBoxplotCoordFlip()
+    boxplot_manual_limits <- getBoxplotManualLimits()
+    boxplot_lower_limit <- getBoxplotLowerLimit()
+    boxplot_upper_limit <- getBoxplotUpperLimit()
     
     if(marginal) {
       d <- data_marginal
@@ -474,13 +523,13 @@ shinyServer( function(input, output, session) {
     ## what kind of plot to generate?
     if( facet2 == "None" ) {
       p <- p + switch(plot_type,
-        boxplot=geom_boxplot( aes_string(x=facet1, y=phenotype), fill="#ABCDEF" ),
+        boxplot=geom_boxplot( aes_string(x=facet1, y=phenotype), fill="#ABCDEF"),
         histogram=geom_histogram( aes_string(x=phenotype, fill=facet1), alpha=0.5, position="identity" ),
         density=geom_density( aes_string(x=phenotype, fill=facet1), alpha=0.5 )
       )
     } else {
       p <- p + switch(plot_type,
-        boxplot=geom_boxplot( aes_string(x=facet2, y=phenotype, fill=facet1) ),
+        boxplot=geom_boxplot( aes_string(x=facet2, y=phenotype, fill=facet1)),
         histogram=geom_histogram( aes_string(x=phenotype, fill=facet1), alpha=0.5, position="identity" ),
         density=geom_density( aes_string(x=phenotype, fill=facet1), alpha=0.5 )
       )
@@ -499,22 +548,23 @@ shinyServer( function(input, output, session) {
       }
       
       if (boxplot_orientation == "Horizontal") {
-        p <- p +
-          coord_flip()
-      }
-      
-    } else {
-      if (boxplot_coord_flip) {
-        p <- p +
-          xlab( phenoToLabel(phenotype) ) +
-          facet_grid( paste("Cytokine", "~", facet2) )
+        if (boxplot_manual_limits) {
+          p <- p +
+            coord_flip(ylim=c(boxplot_lower_limit, boxplot_upper_limit))
+        } else {
+          p <- p +
+            coord_flip()
+        }
       } else {
-        p <- p +
-          xlab( phenoToLabel(phenotype) ) +
-          facet_grid( paste(facet2, "~", "Cytokine") )
+        if (boxplot_manual_limits) {
+          p <- p +
+            coord_cartesian(ylim=c(boxplot_lower_limit, boxplot_upper_limit))
+        } 
       }
       
     }
+    
+    
     
     plot(p)
     
