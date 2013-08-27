@@ -1,3 +1,4 @@
+library(RColorBrewer)
 library(ggplot2)
 library(Kmisc) ## devtools::install_github("Kmisc", "kevinushey", subdir="Kmisc")
 library(shiny)
@@ -6,6 +7,7 @@ library(data.table)
 library(data.table.extras) ## install_github("data.table.extras", "kevinushey")
 library(gtools)
 library(stringr)
+library(scales)
 #library(rCharts)
 
 CELL_DATA <- "data/RV144 CaseControl/res.rds"
@@ -42,6 +44,7 @@ plot_type <- "boxplot"
 ## translates phenotype to label for different plots
 phenoToLabel <- function(x) {
   return( switch(x,
+    `LogFoldChange`="Log Fold Change",
     `Proportion`="Proportion",
     `Proportion_bg`="Proportion\n(BG Corrected)",
     `Proportion_log10`="Proportion\n(log10 transformed)",
@@ -301,11 +304,11 @@ shinyServer( function(input, output, session) {
     
     p1 <- ggplot( d, aes_string(x="Cytokine", y=y_var, fill=phenotype)) +
       geom_tile() +
-      scale_fill_gradient(
-        low="white", 
-        high="steelblue", 
-        name=phenoToLabel(phenotype),
-        na.value="white"
+      scale_fill_gradient2(
+        low="steelblue",
+        mid="white",
+        high="darkorange",
+        name=phenoToLabel(phenotype)
       ) +
       scale_x_discrete(expand=c(0,0)) +
       scale_y_discrete(expand=c(0,0), breaks=NULL) +
