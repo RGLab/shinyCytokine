@@ -1,19 +1,21 @@
 ## preprocessing of data for cytokine visualization script
 
+library(car)
 library(Kmisc) ## devtools::install_github("Kmisc", "kevinushey", subdir="Kmisc")
 library(data.table.extras) ## devtools::install_github("data.table.extras", "kevinushey")
 library(reshape2)
 library(testthat)
 library(plyr)
+library(flowCore)
 
 source("common_functions.R")
 
 ## debug
-dat_file <- "data/res_cd4.rds"
-meta_file <- "data/meta.rds"
-counts_file <- "data/cd4_counts.rds"
+dat_file <- "data/RV144 Pilot Study/res_cd4.rds"
+meta_file <- "data/RV144 Pilot Study/meta.rds"
+counts_file <- "data/RV144 Pilot Study/cd4_counts.rds"
 name <- "cd4_joint"
-generate_proportions <- joint
+generate_proportions <- marginal
 
 preprocess <- function(dat_file, meta_file, counts_file, name, generate_proportions) {
   
@@ -50,7 +52,7 @@ preprocess <- function(dat_file, meta_file, counts_file, name, generate_proporti
   stopifnot( all( names(dat) == names(counts) ) )
   
   ## ensure each entry is a matrix
-  stopifnot( identical( names( counts( sapply( dat, class ) ) ), "matrix" ) )
+  stopifnot( identical( names( Kmisc::counts( sapply( dat, class ) ) ), "matrix" ) )
   
   ## find negatives
   stopifnot(
@@ -61,7 +63,7 @@ preprocess <- function(dat_file, meta_file, counts_file, name, generate_proporti
   
   ## generate all possible permutations
   cytokines <- unname( unclass( colnames( dat[[1]] ) ) )
-  saveRDS(cytokines, "data/cytokines.rds")
+  saveRDS(cytokines, "data/RV144 Pilot Study/cytokines.rds")
   combos <- combinations( 1:length(cytokines) )
   ncol <- sum( choose( length(cytokines), 1:length(cytokines) ) )
   colnames <- combinations(cytokines)
@@ -98,12 +100,6 @@ preprocess <- function(dat_file, meta_file, counts_file, name, generate_proporti
     })
   )
   
-  for (i in 1:nrow(d_prop)) {
-    d_prop[i,] <- d_prop[i,] / counts[i]
-  }
-  
-  overall_sample_prop <- rowMeans(d_prop)
-  
   ## compute the 'degree of functionality'
   ## for each cell, we compute the number of cytokines
   ## that have been expressed simultaneously
@@ -118,71 +114,110 @@ preprocess <- function(dat_file, meta_file, counts_file, name, generate_proporti
   merged <- cbind(d_prop, meta)
   
   ## melt for ggplot2 usage
-  dat_prop_melt <- melt(
+  d <- melt(
     merged, 
     id.vars=names(meta),
-    value.name="Proportion", 
+    value.name="Counts", 
     variable.name="Cytokine"
   )
   
   ## cytokine order
-  dat_prop_melt$Cytokine_order <- 
-    stringr::str_count( dat_prop_melt$Cytokine, " x " ) + 1L
+  d$Cytokine_order <- 
+    stringr::str_count( d$Cytokine, " x " ) + 1L
   
   ## more informative name for the samples
-  names(dat_prop_melt)[ names(dat_prop_melt) == "name" ] <- "Sample"
+  names(d)[ names(d) == "name" ] <- "Sample"
   
-  ## perform background subtraction on the proportions
-  ## ie, for a given PTID x VISIT combo, subtract the
-  ## neg. controls
-  d_bg <- ddply( dat_prop_melt, .(PTID, VISITNO), function(DF) {
-    if( length( grep("^negctrl", DF$Stim) ) == 0 ) {
-      warning("No negative controls for this sample! PTID = ", DF$PTID[1], ", VISITNO = ", DF$VISITNO[1])
-      DF$Proportion_bg <- DF$Proportion
-    } else {
-      DF$Proportion_bg <-
-        DF$Proportion - mean( DF$Proportion[ grep("^negctrl", DF$Stim) ] )
-    }
-    return(DF)
+  ## merge in cell counts
+  tmp <- data.frame(
+    Sample=names(counts),
+    TotalCellCount=counts
+  )
+  d <- merge(d, tmp, by="Sample", all.x=TRUE)
+  rm(tmp)
+  
+  ## compute 'number of cells expressing at least one cytokine'
+  tmp <- sapply(dat, function(x) {
+    sum( apply(x, 1, function(xx) {
+      any( xx > 0 )
+    } ) )
   })
+  tmp <- data.frame(
+    Sample=names(tmp),
+    TotalActivated=tmp
+  )
+  d <- merge( d, tmp, by="Sample", all.x=TRUE)
+  rm(tmp)
   
-  ## FIXME: Add / remove negctrl?
-  ## remove sebctrl, negctrl
-#   d2 <- droplevels( d_bg[
-#     d_bg$Stim %nin% grep("ctrl", unique(d_bg$Stim), value=TRUE),
-#   ])
-  d2 <- d_bg
+  d <- data.table(d)
   
-  ## add logged proportions
-  d2$Proportion_log10 <- -log10(d2$Proportion)
-  d2$Proportion_bg_log10 <- -log10(d2$Proportion_bg)
+  ## Compute the proportions
+  d[, PropTotal := Counts / TotalCellCount]
+  d[, PropActivated := Counts / TotalActivated]
   
-  ## arcsinh sqrt transformation
-  d2$Proportion_arcsinh <- asinh( sqrt( d2$Proportion ) )
-  d2$Proportion_bg_arcsinh <- asinh( sqrt( d2$Proportion_bg ) )
+  ## BG Correction
+  d[, 
+    PropTotalBG := PropTotal - mean(PropTotal[ grep("^negctrl", Stim) ]), 
+    by=list(PTID, VISITNO, Cytokine)
+  ]
   
-  ## an individual-level data set
-#   d <- data.table(dat_prop_melt)
-#   del(d, VISITNO, Stim, Sample)
-#   setkeyv(d, c("PTID", "Cytokine"))
-#   d <- d[, Proportion := mean(Proportion), by=list(PTID, Cytokine)]
-#   d <- group_subset(d, by=list(PTID, Cytokine))
-#   
+  d[, 
+    PropActivatedBG := PropActivated - mean(PropActivated[ grep("^negctrl", Stim) ]), 
+    by=list(PTID, VISITNO, Cytokine)
+  ]
+  
+  ## correct for missingness
+  negmean <- mean( d[ 
+    Stim %in% c("negctrl 1", "negctrl 2"), 
+    mean(PropTotal), 
+    by=list(PTID, VISITNO, Cytokine) 
+  ]$V1 )
+  
+  d[ 
+    is.na(PropTotalBG), 
+    PropTotalBG := PropTotal - negmean, 
+    by=list(PTID, VISITNO, Cytokine) 
+  ]
+  
+  negmean <- mean( 
+    d[ 
+      Stim %in% c("negctrl 1", "negctrl 2"), 
+      mean(PropActivated), 
+      by=list(PTID, VISITNO, Cytokine) 
+    ]$V1 
+  )
+  
+  d[ 
+    is.na(PropActivatedBG), 
+    PropActivatedBG := PropActivated - negmean, 
+    by=list(PTID, VISITNO, Cytokine) 
+  ]
+  
+  ## Log scale
+  ## Compute log fold changes instead of the subtraction
+  ## log(w_s / w_u), s=stimulated, u=unstimulated)
+  d[,
+    LogFoldChange := log2(
+      (Counts+1) / mean(Counts[ Stim == "negctrl 1" ] + 1)
+    ),
+    by=list(PTID, VISITNO, Cytokine)
+  ]
+  
   ## write the files out
-  dir.create( paste0("data/", name), showWarnings=FALSE )
-  ## saveRDS( dat_prop_melt, file=paste0("data/", name, "/sample_proportions_postProcess.rds") )
+  dir.create( paste0("data/RV144 Pilot Study/", name), showWarnings=FALSE )
+  ## saveRDS( d, file=paste0("data/", name, "/sample_proportions_postProcess.rds") )
   ## saveRDS( d, file=paste0("data/", name, "/indiv_proportions_postProcess.rds") )
-  saveRDS( d2, file=paste0("data/", name, "/", name, "_sample_proportions_bg_subtracted.rds") )
+  saveRDS( d, file=paste0("data/RV144 Pilot Study/", name, "/", name, "_sample_proportions_bg_subtracted.rds") )
   ## saveRDS( dof, file=paste0("data/", name, "/cell_dof_marginal.rds") )
-  ## dat <- dat_prop_melt[ dat_prop_melt$Cytokine %in% cytokines, ]
+  ## dat <- d[ d$Cytokine %in% cytokines, ]
   ## saveRDS( dat, file=paste0("data/", name, "/sample_proportions_postProcess_noCombo_marginal.rds") )
   
 }
 
 ## CD4
-preprocess("data/res_cd4.rds", "data/meta.rds", "data/cd4_counts.rds", "cd4_marginal", marginal)
-preprocess("data/res_cd4.rds", "data/meta.rds", "data/cd4_counts.rds", "cd4_joint", joint)
+preprocess("data/RV144 Pilot Study/res_cd4.rds", "data/RV144 Pilot Study/meta.rds", "data/RV144 Pilot Study/cd4_counts.rds", "cd4_marginal", marginal)
+preprocess("data/RV144 Pilot Study/res_cd4.rds", "data/RV144 Pilot Study/meta.rds", "data/RV144 Pilot Study/cd4_counts.rds", "cd4_joint", joint)
 
 ## CD8
-preprocess("data/res_cd8.rds", "data/meta.rds", "data/cd8_counts.rds", "cd8_marginal", marginal)
-preprocess("data/res_cd8.rds", "data/meta.rds", "data/cd8_counts.rds", "cd8_joint", joint)
+preprocess("data/RV144 Pilot Study/res_cd8.rds", "data/RV144 Pilot Study/meta.rds", "data/RV144 Pilot Study/cd8_counts.rds", "cd8_marginal", marginal)
+preprocess("data/RV144 Pilot Study/res_cd8.rds", "data/RV144 Pilot Study/meta.rds", "data/RV144 Pilot Study/cd8_counts.rds", "cd8_joint", joint)

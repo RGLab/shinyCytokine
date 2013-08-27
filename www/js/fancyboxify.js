@@ -36,7 +36,7 @@ $(document).ready( function() {
       }
     });
     
-    console.log("height_offset is: " + height_offset);
+    // console.log("height_offset is: " + height_offset);
     
     // set the class of the double-clicked element
     if ($this.hasClass("fancybox")) {

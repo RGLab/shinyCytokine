@@ -1,9 +1,12 @@
 #library(rCharts)
 library(shinyGridster)
 
-meta <- readRDS("data/meta.rds")
-dat <- readRDS("data/res_cd4.rds")
-dat_post <- readRDS("data/cd4_marginal//cd4_marginal_sample_proportions_bg_subtracted.rds")
+meta <- readRDS("data/RV144 CaseControl/meta.rds")
+dat <- readRDS("data/RV144 CaseControl/res.rds")
+dat_post <- readRDS("data/RV144 CaseControl/cd4_marginal/cd4_marginal_sample_proportions_bg_subtracted.rds")
+
+## hacky fix for the new data
+meta <- group_subset(dat_post, by=PTID)[, 1:grep("Stim", names(dat_post)), with=FALSE]
 
 ## width, height for gridster + plot elements
 width <- 430
@@ -32,20 +35,19 @@ shinyUI( bootstrapPage(
     
     gridsterItem( row=1, col=1, sizex=1, sizey=2,
       
-      tags$div( style="overflow: auto; width: 100%;",
+      tags$div( class="overflow-auto",
         
-        tags$div( style="float: left; width: 45%;",
+        tags$div( style="float: left; width: 50%;",
           selectInput("phenotype", label="Phenotype", choices=list(
-            `Proportion`="Proportion",
-            `Proportion (log10 transformed)`="Proportion_log10",
-            `Proportion (arc-sine transformed)`="Proportion_arcsinh",
-            `Proportion (BG Corrected)`="Proportion_bg",
-            `Proportion (BG Corrected, log10 transformed)`="Proportion_bg_log10",
-            `Proportion (BG Corrected, arc-sine transformed)`="Proportion_bg_arcsinh"
+            `Log Fold Change`="LogFoldChange",
+            `Proportion (rel. Total)`="PropTotal",
+            `Proportion (rel. Total Activated`="PropActivated",
+            `Proportion (BG Corrected, rel. Total)`="PropTotalBG",
+            `Proportion (BG Corrected, rel. Total Activated)`="PropActivatedBG"
           ))
         ),
         
-        tags$div( style="float: left; margin-left: 10px; width: 45%;",
+        tags$div( style="float: right; width: 50%;",
           selectInput("marginal", label="Distribution", choices=list(
             Marginal=TRUE,
             Joint=FALSE
@@ -75,46 +77,54 @@ shinyUI( bootstrapPage(
       
       ## multiple selectInput doesn't work with gridster :( (yet?)
       #h3("Cytokine Combinations"),
-      checkboxGroupInput("cytokines",
-        label="Cytokine Combinations",
-        choices=unname( colnames( dat[[1]] ) ),
-        selected=unname( colnames( dat[[1]] ) )
+      tags$div( class="overflow-auto",
+        checkboxGroupInput("cytokines",
+          label="Cytokine Combinations",
+          choices=unname( colnames( dat[[1]] ) ),
+          selected=unname( colnames( dat[[1]] ) )
+        )
       ),
       
-      sliderInput("cytokine_filter",
-        label="Remove Cytokine Combinations with p < x",
-        min=0,
-        max=0.01,
-        value=1E-4,
-        step=1E-6
+      tags$div(
+        numericInput("cytokine_filter",
+          label='Remove cytokine combinations with average p < x',
+          value=1E-4
+        )
       ),
       
       ## overflow: auto keeps div from collapsing to zero height
       ## see: http://stackoverflow.com/questions/218760/how-do-you-keep-parents-of-floated-elements-from-collapsing
-      tags$div( style="overflow: auto;",
-        tags$div( style="width: 45%; float: left;",
+      tags$div(
+        tags$div( style="width: 50%; float: left;",
           tags$label( `for`="cytokine_order_min", "Minimum Cytokine Order Combination"),
-          tags$input( style="width: 80%;", id="cytokine_order_min", type="number", value="1", min="1", max=ncol( dat[[1]] ), step="1" )
+          tags$input( id="cytokine_order_min", type="number", value="1", min="1", max=ncol( dat[[1]] ), step="1" )
         ),
-        tags$div( style="width: 45%; float: right;", 
+        tags$div( style="width: 50%; float: right;", 
           tags$label( `for`="cytokine_order_max", "Maximum Cytokine Order Combination"),
-          tags$input( style="width: 80%;", id="cytokine_order_max", type="number", value=ncol( dat[[1]] ), min="1", max=ncol( dat[[1]] ), step="1" )
+          tags$input( id="cytokine_order_max", type="number", value=ncol( dat[[1]] ), min="1", max=ncol( dat[[1]] ), step="1" )
         )
       ),
       
       #h3("Facets"),
-      tags$div( style="overflow: auto;",
+      tags$div(
         
-        tags$div( style="width: 45%; float: left;",
+        tags$div( style="width: 33%; float: left;",
           selectInput("facet1",
             label="Facet 1",
             choices=c("Original Ordering", gsub("name", "Sample", names(meta)))
           )
         ),
         
-        tags$div( style="width: 45%; float: right;",
+        tags$div( style="width: 33%; float: left;",
           selectInput("facet2",
             label="Facet 2",
+            choices=c("None", gsub("name", "Sample", names(meta)))
+          )
+        ),
+        
+        tags$div( style="width: 33%; float: left;",
+          selectInput("facet3",
+            label="Facet 3",
             choices=c("None", gsub("name", "Sample", names(meta)))
           )
         )
@@ -176,7 +186,8 @@ shinyUI( bootstrapPage(
       #         label="Sample",
       #         choices=unique(as.character(meta$name))
       #       ),
-      plotOutput("dofplot", width=width, height=height)
+      plotOutput("dofplot", width=width, height=height-20),
+      checkboxInput("flip_dofplot", "Flip Axes?", value=FALSE)
     ),
     
     gridsterItem(row=3, col=1, sizex=3, sizey=2,
@@ -188,8 +199,7 @@ shinyUI( bootstrapPage(
         tags$div( id="boxplot_by_cytokine", class="shiny-plot-output",
           style=paste0(
             "width: ", width*3, "px; ",
-            "height: ", height*2-30, "px; ",
-            "margin: 0 auto;"
+            "height: ", height*2-30, "px; "
           )
         ),
         tags$div( style="overflow: auto;",
@@ -220,7 +230,7 @@ shinyUI( bootstrapPage(
     ),
     
     gridsterItem(row=4, col=1, sizex=3, sizey=2,
-      tags$div( style="overflow: auto; width: 1290px; height: 600px;",
+      tags$div( style="width: 1290px; height: 600px;",
         h2("Summary Statistics"),
         tableOutput("stats")
       )

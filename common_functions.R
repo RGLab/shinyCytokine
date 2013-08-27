@@ -21,6 +21,7 @@ stopifnot( identical( unlist( combinations(1:6)[1:6] ), 1:6 ) )
 marginal <- function(dat, combos, ncol, colnames) {
   d <- vector("list", length(dat))
   for( i in 1:length(dat) ) {
+    cat("Iteration", i, "of", length(dat), ".\n")
     x <- dat[[i]]
     output <- matrix(FALSE, nrow=nrow(x), ncol=ncol)
     for( j in 1:ncol(output) ) {
@@ -41,7 +42,7 @@ joint <- function(dat, combos, ncol, colnames) {
   
   d <- vector("list", length(dat))
   for( i in 1:length(dat) ) {
-    ## cat(i, "\n")
+    cat("Iteration", i, "of", length(dat), ".\n")
     x <- dat[[i]]
     output <- matrix(FALSE, nrow=nrow(x), ncol=ncol)
     for( j in 1:ncol(output) ) {

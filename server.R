@@ -8,11 +8,11 @@ library(gtools)
 library(stringr)
 #library(rCharts)
 
-CELL_DATA <- "data/res_cd4.rds"
-COUNTS <- "data/cd4_counts.rds"
-DATA <- "data/cd4_joint/cd4_joint_sample_proportions_bg_subtracted.rds"
-DATA_MARGINAL <- "data/cd4_marginal/cd4_marginal_sample_proportions_bg_subtracted.rds"
-META <- "data/meta.rds"
+CELL_DATA <- "data/RV144 CaseControl/res.rds"
+COUNTS <- "data/RV144 CaseControl/cd4_counts.rds"
+DATA <- "data/RV144 CaseControl/cd4_joint/cd4_joint_sample_proportions_bg_subtracted.rds"
+DATA_MARGINAL <- "data/RV144 CaseControl/cd4_marginal/cd4_marginal_sample_proportions_bg_subtracted.rds"
+META <- "data/RV144 CaseControl/meta.rds"
 
 source("common_functions.R")
 
@@ -31,9 +31,10 @@ cell_counts <- data.frame(
   counts=counts
 )
 
-## FIXME: remove sebctrl, negctrl
-d <- dat <- dat[ dat$Stim %nin% c("sebctrl", "negctrl 1", "negctrl 2"), ]
-data_marginal <- data_marginal[ data_marginal$Stim %nin% c("sebctrl", "negctrl 1", "negctrl 2"), ]
+## FIXME: remove sebctrl, negctrl?
+d <- dat 
+# d <- dat <- dat[ dat$Stim %nin% c("sebctrl", "negctrl 1", "negctrl 2"), ]
+# data_marginal <- data_marginal[ data_marginal$Stim %nin% c("sebctrl", "negctrl 1", "negctrl 2"), ]
 
 ## TODO: allow other plot types
 plot_type <- "boxplot"
@@ -52,7 +53,7 @@ y_var <- "Sample"
 
 ## A function used to filter a dataset based on a vector of
 ## cytokines
-filter_cytokines <- function(d, cytokines, p, order) {
+filter_cytokines <- function(d, cytokines, p, order, phenotype) {
   
   ## first, only keep cytokines that have been selected
   if( length(cytokines) == 0 ) {
@@ -66,7 +67,7 @@ filter_cytokines <- function(d, cytokines, p, order) {
   }
   
   ## then, remove cytokine combos that have an overall proportion < p
-  props <- with(d, tapply_(Proportion, Cytokine, mean))
+  props <- with(d, tapply_(d[[phenotype]], Cytokine, function(x) mean(x, na.rm=TRUE)))
   keep <- names(props)[props >= p]
   
   ## keep only terms of a certain order
@@ -112,6 +113,10 @@ shinyServer( function(input, output, session) {
   
   getFacet2 <- reactive({
     return( input$facet2 )
+  })
+  
+  getFacet3 <- reactive({
+    return( input$facet3 )
   })
   
   getSample <- reactive({
@@ -283,14 +288,14 @@ shinyServer( function(input, output, session) {
     flip_heatmap <- getFlipHeatmap()
     marginal <- isMarginal()
     
-    if(marginal) {
+    if (marginal) {
       d <- data_marginal
     } else {
       d <- dat
     }
     
     ## filter the cytokines
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order)
+    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order, phenotype)
     d <- customFilter(d, custom_filter)
     d <- filter1(d, filter1, filter1_cb)
     
@@ -300,7 +305,6 @@ shinyServer( function(input, output, session) {
         low="white", 
         high="steelblue", 
         name=phenoToLabel(phenotype),
-        trans="log10",
         na.value="white"
       ) +
       scale_x_discrete(expand=c(0,0)) +
@@ -362,7 +366,7 @@ shinyServer( function(input, output, session) {
     }
     
     ## filter the cytokines
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order)
+    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order, phenotype)
     d <- customFilter(d, custom_filter)
     d <- filter1(d, filter1, filter1_cb)
     
@@ -415,6 +419,7 @@ shinyServer( function(input, output, session) {
     filter1_cb <- getFilter1Cb()
     custom_filter <- getCustomFilter()
     marginal <- isMarginal()
+    flip_dofplot <- input$flip_dofplot
     
     if(marginal) {
       d <- data_marginal
@@ -430,48 +435,77 @@ shinyServer( function(input, output, session) {
     ## get the samples belonging to the currently selected individual
     samples <- cell_data[ names(cell_data) %in% d$Sample ]
     
+    ## computing the degree of functionality
+    ## for each cell, we compute the number of cytokines that were
+    ## expressed (expression value > 0). then, we generate 
+    ## counts of these values. for example, given 3 cells in a sample like
+    
+    ## IL1 TNFa INFg
+    ## 0 1 0
+    ## 0 0 1
+    ## 1 1 0
+    
+    ## we should get output like
+    
+    ## sample num_cytokines_expressed count
+    ## 1 0 0
+    ## 1 1 2
+    ## 1 2 1
+    ## 1 3 0
+    
+    ## the zero counts can be left out
+    
     ## compute the degree of functionality:
     ## for each cell, the DOF == the number of cytokines expressed
     samples_dof <- stack( lapply( samples, function(x) {
       rowSums(x > 0)
     }) )
     
+    samples_dof <- data.table(samples_dof)
+    samples_dof <- samples_dof[, {
+      counts <- Kmisc::counts(values)
+      list(counts=counts, order=names(counts))
+      }, by=ind]
     ## merge in cell counts
-    samples_dof <- merge( samples_dof, cell_counts, by.x="ind", by.y="Sample" )
+    dof <- merge.data.frame( samples_dof, cell_counts, by.x="ind", by.y="Sample", all.x=TRUE )
+    dof$prop <- dof$counts.x / dof$counts.y
     
     ## merge in meta-info
-    samples_dof <- merge( 
-      samples_dof, 
+    dof <- unique( merge( 
+      dof, 
       d[ names(d) %in% c("Sample", names(meta)) ], 
       by.x="ind", 
-      by.y="Sample"
-    )
+      by.y="Sample",
+      all.x=TRUE
+    ) )
     
-    p <- ggplot(samples_dof, aes(x=factor(values))) +
-      theme( 
-        # axis.text.x = element_text(angle=45, hjust=1),
-        title = element_text(family="Gill Sans")
+    p <- ggplot(dof, aes(x=factor(order), y=prop)) +
+      theme(
+        title=element_text(family="Gill Sans")
       ) +
       xlab("Degree of Functionality") +
-      ylab("Number of Cells") +
+      ylab("Proportion of Cells") +
       ggtitle(paste("DOF Plot\nIndividual:", individual))
     
     if( facet1 != "Original Ordering" ) {
       if( facet2 == "None" ) {
         p <- p + 
-          geom_bar( aes_string(fill=facet1), position="dodge" )
+          geom_bar( aes_string(fill=facet1), stat="identity", position="dodge" )
         #facet_grid( paste( facet1, "~ ." ) )
       } else {
         p <- p + 
-          geom_bar( aes_string(fill=facet1), position="dodge") +
-          facet_grid( paste( facet1, "~ ." ) )
+          geom_bar( aes_string(fill=facet1), stat="identity", position="dodge") +
+          facet_grid( paste( facet2, "~ ." ) )
       }
     } else {
       p <- p +
-        geom_bar(position="dodge")
+        geom_bar(stat="identity", position="dodge")
         
     }
     
+    if (flip_dofplot) {
+      p <- p + coord_flip()
+    }
     
     plot(p)
     
@@ -482,6 +516,7 @@ shinyServer( function(input, output, session) {
     
     facet1 <- getFacet1()
     facet2 <- getFacet2()
+    facet3 <- getFacet3()
     heatmap_level <- getHeatmapLevel()
     cytokines <- getCytokines()
     cytokine_filter <- getCytokineFilter()
@@ -504,7 +539,7 @@ shinyServer( function(input, output, session) {
     }
     
     ## filter the cytokines
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order)
+    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order, phenotype)
     d <- customFilter(d, custom_filter)
     d <- filter1(d, filter1, filter1_cb)
     
@@ -538,13 +573,25 @@ shinyServer( function(input, output, session) {
     if( plot_type == "boxplot" ) {
       
       if (boxplot_coord_flip) {
-        p <- p +
-          ylab( phenoToLabel(phenotype) ) +
-          facet_grid("Cytokine ~ .")
+        if (facet3 != "None") {
+          p <- p +
+            ylab( phenoToLabel(phenotype) ) +
+            facet_grid(paste("Cytokine ~", facet3))
+        } else {
+          p <- p +
+            ylab( phenoToLabel(phenotype) ) +
+            facet_grid("Cytokine ~ .")
+        }
       } else {
-        p <- p +
-          ylab( phenoToLabel(phenotype) ) +
-          facet_grid(". ~ Cytokine")
+        if (facet3 != "None") {
+          p <- p +
+            ylab( phenoToLabel(phenotype) ) +
+            facet_grid(paste(facet3, "~ Cytokine"))
+        } else {
+          p <- p +
+            ylab( phenoToLabel(phenotype) ) +
+            facet_grid(". ~ Cytokine")
+        }
       }
       
       if (boxplot_orientation == "Horizontal") {
@@ -592,7 +639,7 @@ shinyServer( function(input, output, session) {
     }
     
     ## filter the cytokines
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order)
+    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order, phenotype)
     d <- customFilter(d, custom_filter)
     d <- filter1(d, filter1, filter1_cb)
     d <- droplevels(d)
