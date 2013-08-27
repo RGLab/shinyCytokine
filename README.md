@@ -6,7 +6,7 @@ in-progress paper.
 
 The application currently requires data of a specific
 format in the `data` subfolder; this can be obtained from `blackrhino`.
-Currently, it's set to work with the RV144 pilot study, CD4+ data.
+Currently, it's set to work with the RV144 CaseControl data.
 
 The Shiny application can be viewed at:
 
