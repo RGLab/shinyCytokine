@@ -306,9 +306,10 @@ shinyServer( function(input, output, session) {
       geom_tile() +
       scale_fill_gradient2(
         low="steelblue",
-        mid="white",
+        mid="grey97",
         high="darkorange",
-        name=phenoToLabel(phenotype)
+        name=phenoToLabel(phenotype),
+        na.value="maroon"
       ) +
       scale_x_discrete(expand=c(0,0)) +
       scale_y_discrete(expand=c(0,0), breaks=NULL) +
