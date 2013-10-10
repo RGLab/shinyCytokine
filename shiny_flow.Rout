@@ -1,0 +1,170 @@
+
+R version 3.0.1 (2013-05-16) -- "Good Sport"
+Copyright (C) 2013 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> setwd("~/RGLab/ShinyApp_flowWorkspace/")
+> shiny::runApp(port=61216)
+Loading required package: shiny
+Loading required package: flowWorkspace
+Loading required package: Rcpp
+Loading required package: Cairo
+Loading required package: BiocGenerics
+Loading required package: parallel
+Warning in .simpleDuplicateClass(def, prev) :
+  the specification for S3 class “AsIs” in package ‘BiocGenerics’ seems equivalent to one from package ‘RJSONIO’ and is not turning on duplicate class definitions for this class
+Warning in .simpleDuplicateClass(def, prev) :
+  the specification for S3 class “connection” in package ‘BiocGenerics’ seems equivalent to one from package ‘RJSONIO’ and is not turning on duplicate class definitions for this class
+Warning in .simpleDuplicateClass(def, prev) :
+  the specification for S3 class “file” in package ‘BiocGenerics’ seems equivalent to one from package ‘RJSONIO’ and is not turning on duplicate class definitions for this class
+Warning in .simpleDuplicateClass(def, prev) :
+  the specification for S3 class “pipe” in package ‘BiocGenerics’ seems equivalent to one from package ‘RJSONIO’ and is not turning on duplicate class definitions for this class
+Warning in .simpleDuplicateClass(def, prev) :
+  the specification for S3 class “textConnection” in package ‘BiocGenerics’ seems equivalent to one from package ‘RJSONIO’ and is not turning on duplicate class definitions for this class
+
+Attaching package: ‘BiocGenerics’
+
+The following objects are masked from ‘package:parallel’:
+
+    clusterApply, clusterApplyLB, clusterCall, clusterEvalQ,
+    clusterExport, clusterMap, parApply, parCapply, parLapply,
+    parLapplyLB, parRapply, parSapply, parSapplyLB
+
+The following object is masked from ‘package:stats’:
+
+    xtabs
+
+The following objects are masked from ‘package:base’:
+
+    anyDuplicated, as.data.frame, cbind, colnames, duplicated, eval,
+    Filter, Find, get, intersect, lapply, Map, mapply, match, mget,
+    order, paste, pmax, pmax.int, pmin, pmin.int, Position, rank,
+    rbind, Reduce, rep.int, rownames, sapply, setdiff, sort, table,
+    tapply, union, unique, unlist
+
+Loading required package: RBGL
+Loading required package: graph
+Loading required package: XML
+
+Attaching package: ‘XML’
+
+The following object is masked from ‘package:graph’:
+
+    addNode
+
+Loading required package: flowCore
+Loading required package: Biobase
+Welcome to Bioconductor
+
+    Vignettes contain introductory material; view with
+    'browseVignettes()'. To cite Bioconductor, see
+    'citation("Biobase")', and for packages 'citation("pkgname")'.
+
+Loading required package: rrcov
+Loading required package: robustbase
+Loading required package: pcaPP
+Loading required package: mvtnorm
+Scalable Robust Estimators with High Breakdown Point (version 1.3-3)
+
+
+Attaching package: ‘flowCore’
+
+The following object is masked from ‘package:stats’:
+
+    filter
+
+The following object is masked from ‘package:base’:
+
+    ls
+
+Loading required package: flowViz
+Loading required package: lattice
+KernSmooth 2.23 loaded
+Copyright M. P. Wand 1997-2009
+Loading required package: IDPmisc
+Loading required package: grid
+Loading required package: tools
+
+Attaching package: ‘tools’
+
+The following object is masked from ‘package:XML’:
+
+    toHTML
+
+Loading required package: hexbin
+Loading required package: gridExtra
+Loading required package: Rgraphviz
+Loading required package: ncdfFlow
+
+Attaching package: ‘flowWorkspace’
+
+The following object is masked from ‘package:rrcov’:
+
+    getData
+
+Loading required package: QUALIFIER
+Loading required package: reshape
+Loading required package: plyr
+
+Attaching package: ‘plyr’
+
+The following object is masked from ‘package:graph’:
+
+    join
+
+
+Attaching package: ‘reshape’
+
+The following object is masked from ‘package:plyr’:
+
+    rename, round_any
+
+Loading required package: RColorBrewer
+
+Attaching package: ‘latticeExtra’
+
+The following object is masked from ‘package:flowViz’:
+
+    ecdfplot
+
+loading R object...
+loading tree object...
+Done
+
+Listening on port 61216
+
+Attaching package: ‘shinyIncubator’
+
+The following object is masked from ‘package:shiny’:
+
+    actionButton
+
+Shiny URLs starting with /gridster will mapped to /home/kevin/R/x86_64-pc-linux-gnu-library/3.0/shinyGridster/gridster
+Error in as.double(y) : 
+  cannot coerce type 'S4' to vector of type 'double'
+$`2`
+
+$`2`
+
+$`2`
+
+$`2`
+
+$`2`
+
+$`2`
+

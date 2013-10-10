@@ -109,3 +109,62 @@ List jointRcpp(List dat, List combos, int ncol, CharacterVector colnames) {
   }
   return d;
 }
+
+// [[Rcpp::export]]
+IntegerMatrix generate_proportions(List x, List combos) {
+  
+  int x_n = x.size();
+  int combos_n = combos.size();
+  IntegerMatrix output(x_n, combos_n);
+  
+  for (int i=0; i < x_n; ++i) {
+    Rcout << "Working with matrix " << i+1 << " of " << x_n << std::endl;
+    LogicalMatrix mat = as<LogicalMatrix>(x[i]);
+    int nrows = mat.nrow();
+    for (int k=0; k < combos_n; ++k) {
+      
+      int num = 0;
+      IntegerVector c_combo = as<IntegerVector>( combos[k] );
+      int n_c = c_combo.size();
+        
+      for (int j=0; j < nrows; ++j) {
+        
+        LogicalVector row = mat(j, _);
+      
+        // checking algorithm:
+        // we loop through each entry in 'c_combo' => p
+        // we check the element in 'row' at 'abs(c_combo[p])'
+        // if 'abs(c_combo[p])' is >0 and row[ c_combo[p] ] is true; continue
+        // if 'abs(c_combo[p])' is <= 0 and row[ c_combo[p] ] is false; continue
+        // else, 'false_case'
+        
+        for (int p=0; p < n_c; ++p) {
+          int c = c_combo[p];
+          int abs_c = abs(c);
+          if (c > 0 && row[abs_c-1] <= 0) {
+            goto false_case;
+          } else if (c < 0 && row[abs_c-1] > 0) {
+            goto false_case;
+          }
+        }
+        
+        // if we reached here, we matched all of our conditions
+        ++num;
+        continue;
+        
+        // we use this goto to skip the 'num' addition
+        false_case: {
+          continue;
+        }
+        
+      }
+      
+      // insert result into matrix
+      output(i, k) = num;
+      
+    }
+  }
+  
+  return output;
+  
+}

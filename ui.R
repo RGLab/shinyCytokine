@@ -1,12 +1,28 @@
-#library(rCharts)
+library(lattice)
+library(rCharts) ## for DataTable
+library(data.table.extras)
 library(shinyGridster)
 
-meta <- readRDS("data/RV144 CaseControl/meta.rds")
-dat <- readRDS("data/RV144 CaseControl/res.rds")
-dat_post <- readRDS("data/RV144 CaseControl/cd4_marginal/cd4_marginal_sample_proportions_bg_subtracted.rds")
+zoomButton <- function(inputId) {
+  tags$i(class="icon-zoom-in", style="position: absolute; right: 10px; bottom: 10px")
+}
 
-## hacky fix for the new data
-meta <- group_subset(dat_post, by=PTID)[, 1:grep("Stim", names(dat_post)), with=FALSE]
+splomOutput <- function(outputId) {
+  tags$div( id="splom-container",
+    tags$div(id=outputId, class="splom")
+  )
+}
+
+#meta <- readRDS("data/RV144 CaseControl/meta.rds")
+dat <- readRDS("data/RV144 CaseControl/res.rds")
+dat_post <- readRDS("data/RV144 CaseControl/cd4/cd4_sample_proportions_bg_subtracted.rds")
+
+## hacky fix for the new data for the case/control RV144 data
+## ie, the meta-data is pulled from dat_post, rather than the separately defined
+## 'meta' file as we have merged new information into it
+meta <- collapse(dat_post, by=PTID)[, 1:grep("Stim", names(dat_post)), with=FALSE]
+
+d <- dat_post[ Stim %nin% c("sebctrl", "negctrl 1", "negctrl 2"), ]
 
 ## width, height for gridster + plot elements
 width <- 430
@@ -22,73 +38,92 @@ svgOutput <- function(outputId, width, height) {
 ## ensure that each matrix has the same column names
 stopifnot( length( table( table( unlist( lapply( dat, names ) ) ) ) ) != 1 )
 
+## cytokines
+cytokines <- unname( colnames(dat[[1]]) )
+cytokines_positive <- paste0( colnames(dat[[1]]), "+" )
+cytokines_negative <- paste0( colnames(dat[[1]]), "-" )
+
 shinyUI( bootstrapPage(
   
+  includeScript("www/js/d3.js"),
   includeCSS("www/css/styles.css"),
   includeScript("www/js/fancyboxify.js"),
+  
+  includeScript("www/jquery-ui/js/jquery-ui-1.10.3.custom.min.js"),
+  includeCSS("www/jquery-ui/css/ui-lightness//jquery-ui-1.10.3.custom.min.css"),
+  
+  includeScript("www/multiselect/multiselect.js"),
+  includeCSS("www/multiselect/multiselect.css"),
+  
+  includeCSS("www/css/shinySplom.css"),
+  includeScript("www/js/shinySplom.js"),
+  
+  includeScript("www/js/gridsterExtras.js"),
+  includeScript("scripts.js"),
   
   singleton( tags$body( style="background-color: #789;" ) ),
   
   h1(style="text-align: center; color: white", "Cytokine Visualization"),
   
-  gridster( width=width, height=height,
+  ## Controls exist separate of gridster layout
+  tags$div( id="gridster-control-container",
     
-    gridsterItem( row=1, col=1, sizex=1, sizey=2,
+    tags$button( type="button", id="gridster-control-hide",
+      "Show Controls"
+    ),
+    
+    tags$button( type="button", id="gridster-control",
+      "Gridster Enabled"
+    ),
+    
+    tags$div(
+      id='controls-container', 
+      selectInput("phenotype", label="Phenotype", choices=list(
+        `Log Fold Change`="LogFoldChange",
+        `Proportion (rel. Total)`="PropTotal",
+        `Proportion (rel. Total Activated`="PropActivated",
+        `Proportion (BG Corrected, rel. Total)`="PropTotalBG",
+        `Proportion (BG Corrected, rel. Total Activated)`="PropActivatedBG"
+      )),
+      
+      ## multiselect requires the attribute 'multiple' to be set; can't set
+      ## this thru regular shiny HTML functions
+      HTML("<select id='cytokines' multiple='multiple'>"),
+      HTML(
+        paste0("<option value='", cytokines_positive, "'> ",
+        cytokines, "</option>")
+      ),
+      HTML("</select>"),
+      
+#       selectInput("cytokines",
+#         label="Cytokine combinations must contain...",
+#         choices=c(
+#           cytokines_positive,
+#           cytokines_negative
+#         ),
+#         multiple=TRUE
+#       ),
       
       tags$div( class="overflow-auto",
-        
+        checkboxGroupInput("cytokines_to_exclude",
+          label="Do not include cytokine combinations containing...",
+          choices=cytokines
+        )
+      ),
+      
+      tags$div( class="overflow-auto",
         tags$div( style="float: left; width: 50%;",
-          selectInput("phenotype", label="Phenotype", choices=list(
-            `Log Fold Change`="LogFoldChange",
-            `Proportion (rel. Total)`="PropTotal",
-            `Proportion (rel. Total Activated`="PropActivated",
-            `Proportion (BG Corrected, rel. Total)`="PropTotalBG",
-            `Proportion (BG Corrected, rel. Total Activated)`="PropActivatedBG"
-          ))
+          numericInput("cytokine_filter",
+            label='Remove cytokine combinations with average phenotype < x',
+            value=0
+          )
         ),
         
         tags$div( style="float: right; width: 50%;",
-          selectInput("marginal", label="Distribution", choices=list(
-            Marginal=TRUE,
-            Joint=FALSE
-          ))
-        )
-        
-      ),
-      
-      #       selectInput("sample",
-      #         label="Sample",
-      #         choices=names(dat)
-      #       ),
-      
-      #       selectInput("cytokine",
-      #         label="Cytokine",
-      #         choices=unname( colnames(dat[[1]]) )
-      #       ),
-      
-      #       h3("Filters"),
-      #       sliderInput("proportion_filter",
-      #         label="Remove Individuals with Overall Proportion < x",
-      #         min=0,
-      #         max=1,
-      #         value=0.05,
-      #         step=0.01
-      #       ),
-      
-      ## multiple selectInput doesn't work with gridster :( (yet?)
-      #h3("Cytokine Combinations"),
-      tags$div( class="overflow-auto",
-        checkboxGroupInput("cytokines",
-          label="Cytokine Combinations",
-          choices=unname( colnames( dat[[1]] ) ),
-          selected=unname( colnames( dat[[1]] ) )
-        )
-      ),
-      
-      tags$div(
-        numericInput("cytokine_filter",
-          label='Remove cytokine combinations with average p < x',
-          value=1E-4
+          numericInput("max_combos_to_show",
+            label=HTML("Show <span style='font-family: monospace;'>n</span> most highly expressed cytokine combinations"),
+            value=5
+          )
         )
       ),
       
@@ -101,7 +136,7 @@ shinyUI( bootstrapPage(
         ),
         tags$div( style="width: 50%; float: right;", 
           tags$label( `for`="cytokine_order_max", "Maximum Cytokine Order Combination"),
-          tags$input( id="cytokine_order_max", type="number", value=ncol( dat[[1]] ), min="1", max=ncol( dat[[1]] ), step="1" )
+          tags$input( id="cytokine_order_max", type="number", value="2", min="1", max=ncol( dat[[1]] ), step="1" )
         )
       ),
       
@@ -131,16 +166,6 @@ shinyUI( bootstrapPage(
         
       ),
       
-      #h3("Plot Type"),
-      #       selectInput("plot_type",
-      #         label="Plot Type",
-      #         choices=list(
-      #           `Boxplots`="boxplot",
-      #           `Histograms`="histogram",
-      #           `Density Plots`="density"
-      #         )
-      #       ),
-      
       selectInput("filter1",
         label="Filter 1",
         choices=c("None", names(meta))
@@ -157,20 +182,22 @@ shinyUI( bootstrapPage(
         value=""
       )
       
-      #       h3("Order Rows by Proportion?"),
-      #       checkboxInput("orderByProportion", label="Yes / No")
-      
-    ),
+    )
+  ),
+  
+  ## Actual gridster object
+  gridster( width=width, height=height,
     
-    gridsterItem(row=1, col=2, sizex=1, sizey=2,
+    gridsterItem(row=1, col=2, sizex=2, sizey=1,
       h4( style="text-align: center;",
-        "Cytokine Proportion by Sample"
+        "Phenotype by Sample"
       ),
-      plotOutput("heatmap", width=width, height=height*2-25),
-      checkboxInput("flip_heatmap", "Flip Axes?", value=FALSE)
+      plotOutput("heatmap", width=width*2, height=height-60),
+      checkboxInput("flip_heatmap", "Flip Axes?", value=FALSE),
+      zoomButton("zoom-heatmap")
     ),
     
-    gridsterItem(row=1, col=3, sizex=1, sizey=1,
+    gridsterItem(row=1, col=1, sizex=1, sizey=1,
       tags$div(
         selectInput("individual",
           label="Individual",
@@ -178,16 +205,24 @@ shinyUI( bootstrapPage(
         ),
         plotOutput("linechart", width=width, height=height-85),
         checkboxInput("flip_linechart", "Flip Axes?", value=FALSE)
-      )
+      ),
+      zoomButton("zoom-linechart")
     ),
     
-    gridsterItem(row=2, col=3, sizex=1, sizey=1,
+    gridsterItem(row=2, col=1, sizex=1, sizey=1,
       #       selectInput("sample",
       #         label="Sample",
       #         choices=unique(as.character(meta$name))
       #       ),
       plotOutput("dofplot", width=width, height=height-20),
-      checkboxInput("flip_dofplot", "Flip Axes?", value=FALSE)
+      checkboxInput("flip_dofplot", "Flip Axes?", value=FALSE),
+      zoomButton("zoom-dofplot")
+    ),
+    
+    ## NOTE: we set the associated CSS for the DataTable generated
+    gridsterItem(row=2, col=2, sizex=2, sizey=1,
+      chartOutput("stats", "datatables"),
+      zoomButton("zoom-stats")
     ),
     
     gridsterItem(row=3, col=1, sizex=3, sizey=2,
@@ -203,10 +238,22 @@ shinyUI( bootstrapPage(
           )
         ),
         tags$div( style="overflow: auto;",
+          
+          tags$div( style="float: left; display: inline-block; margin-right: 20px;",
+            selectInput("plot_type",
+              label="Type of Plot To View",
+              choices=list(
+                `Box Plot`="boxplot",
+                `Histogram`="histogram",
+                `Density Plot`="density"
+              )
+            )
+          ),
+          
           tags$div( style="float: left; display: inline-block;", 
             selectInput("boxplot_by_cytokine_orientation", 
               label="Boxplot Orientation",
-              choices=c("Horizontal", "Vertical")
+              choices=c("Vertical", "Horizontal")
             )
           ),
           tags$div( style="float: left; display: inline-block; margin-left: 20px;",
@@ -225,26 +272,16 @@ shinyUI( bootstrapPage(
               label="Flip Axes?"
             )
           )
-        )
+          
+        ),
+        zoomButton("zoom-boxplot")
       )
     ),
     
-    gridsterItem(row=4, col=1, sizex=3, sizey=2,
-      tags$div( style="width: 1290px; height: 600px;",
-        h2("Summary Statistics"),
-        tableOutput("stats")
-      )
+    gridsterItem(row=3, col=1, sizex=2, sizey=2,
+      splomOutput("splom"),
+      zoomButton("zoom-splom")
     )
-    
-    #     gridsterItem(row=5, col=1, sizex=1, sizey=1,
-    #       tags$div( style=paste("width:", width, "; height:", height),
-    #         showOutput("rchart", "polycharts")
-    #       )
-    #     )
-    
-    #     gridsterItem(row=4, col=1, sizex=3, sizey=1,
-    #       verbatimTextOutput("debug")
-    #     )
     
   )
   

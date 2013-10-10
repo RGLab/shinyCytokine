@@ -9,7 +9,7 @@ $(document).ready( function() {
   var fancyboxify = function() {
     
     // $this refers to the .gridster li element double-clicked
-    $this = $(this);
+    $this = $(this).parent();
     
     // blur all other elements
     $("body > *").not($this).toggleClass("blur");
@@ -41,6 +41,9 @@ $(document).ready( function() {
     // set the class of the double-clicked element
     if ($this.hasClass("fancybox")) {
       
+      // display the constrols
+      $("#gridster-control-container").css("display", "block");
+      
       $this
         .find("div.shiny-plot-output")
         .css("width", elem_width)
@@ -54,6 +57,9 @@ $(document).ready( function() {
       ;
       
     } else {
+      
+      // hide the controls
+      $("#gridster-control-container").css("display", "none");
       
       // update the 'reset' settings
       elem_width = $this
@@ -105,6 +111,9 @@ $(document).ready( function() {
   };
   
   // double click to 'fancybox'ify
-  $(".gridster li").dblclick( fancyboxify );
+  // $(".gridster li").dblclick( fancyboxify );
+  
+  // click on a zoom icon to 'fancybox'ify
+  $("i.icon-zoom-in").click( fancyboxify );
   
 });

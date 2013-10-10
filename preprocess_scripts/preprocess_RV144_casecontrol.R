@@ -1,5 +1,6 @@
 ## preprocessing of data for cytokine visualization script
 
+library(stringr)
 library(car)
 library(Kmisc) ## devtools::install_github("Kmisc", "kevinushey", subdir="Kmisc")
 library(data.table.extras) ## devtools::install_github("data.table.extras", "kevinushey")
@@ -15,16 +16,16 @@ sourceCpp("preprocess_scripts/generate_proportions.cpp")
 dat_file <- "data/RV144 CaseControl/res.rds"
 meta_file <- "data/RV144 CaseControl/meta.rds"
 counts_file <- "data/RV144 CaseControl/cd4_counts.rds"
-name <- "cd4_marginal"
-generate_proportions <- marginalRcpp
+name <- "cd4"
 
-preprocess <- function(dat_file, meta_file, counts_file, name, generate_proportions) {
-  
-  generate_proportions <- match.fun(generate_proportions)
+preprocess <- function(dat_file, meta_file, counts_file, name) {
   
   dat <- readRDS(dat_file)
   meta <- readRDS(meta_file)
   counts <- readRDS(counts_file)
+  
+  ## fit a mixture model to the counts to determine which are too 'low'
+  ## and which are okay
   
   ## remove FCS files with abnormally low cell counts
   low_cell_counts <- names(counts)[ counts < 1E4 ]
@@ -67,9 +68,14 @@ preprocess <- function(dat_file, meta_file, counts_file, name, generate_proporti
   ## generate all possible permutations
   cytokines <- unname( unclass( colnames( dat[[1]] ) ) )
   saveRDS(cytokines, "data/RV144 CaseControl/cytokines.rds")
-  combos <- combinations( 1:length(cytokines) )
-  ncol <- sum( choose( length(cytokines), 1:length(cytokines) ) )
-  colnames <- combinations(cytokines)
+  combos <- combinations( c(1:length(cytokines), -1:-length(cytokines)) )
+  combos <- combos[ sapply(combos, function(x) !any( duplicated( abs(x) ) ) ) ]
+  ncol <- length(combos)
+  colnames <- sapply(combos, function(x) {
+    paste( collapse="",
+      swap(x, c(1:6, -1:-6), c(paste0(cytokines, "+"), paste0(cytokines, "-")))
+    )
+  })
   
   ## re-order each matrix to be the same column order
   dat[] <- lapply(dat, function(x) {
@@ -77,37 +83,35 @@ preprocess <- function(dat_file, meta_file, counts_file, name, generate_proporti
   })
   
   ## test all the names
-  tmp <- unlist( colnames[1:6] )
   for( i in 1:length(dat) ) {
-    stopifnot( all( tmp == colnames(dat[[i]]) ) )
+    stopifnot( all( cytokines == colnames(dat[[i]]) ) )
   }
   
-  ## make sure they're identical across 'combos', 'colnames'
-  for( i in 1:length(combos) ) {
-    for( j in 1:length(dat) ) {
-      stopifnot( all( colnames(dat[[j]])[combos[[i]]] == colnames[[i]] ) )  
-    }
-  }
-  
-  ## collapse the colnames
-  colnames <- sapply(colnames, paste, collapse=" x ")
+  ## convert to logical (on/off)
+  dat <- lapply(dat, function(x) {
+    colApply(x, drop=FALSE, function(x) {
+      as.logical(x)
+    })
+  })
   
   ## generate proportions for all cytokine combinations
-  d <- generate_proportions(dat, combos, ncol, colnames)
-  attr(d, "names") <- names(dat)
+  d_counts <- generate_proportions(dat, combos)
+  colnames(d_counts) <- colnames
+  rownames(d_counts) <- names(dat)
   
-  ## compute proportions
-  ## use the total counts to compute proportions
-  d_prop <- do.call( rbind, 
-    lapply(d, function(x) {
-      colApply(x, sum)
-    })
-  )
-  
-  d_prop2 <- matrix(0, length(d), ncol(d[[1]]))
-  for (i in 1:nrow(d_prop2)) {
-    d_prop2[i,] <- apply( d[[i]], 2, sum ) / counts[i]
-  }
+  ## a test
+  i <- 700
+  c_combo <- combos[i]
+  c_d <- d_counts[,i]
+  j <- which.max(c_d)
+  tmp <- rowApply( dat[[j]], function(xx) {
+    if (xx[1] == FALSE && xx[2] == TRUE && xx[3] == TRUE && xx[4] == TRUE && xx[5] == FALSE && xx[6] == FALSE) {
+      return(TRUE)
+    } else {
+      return(FALSE)
+    }
+  })
+  stopifnot( identical( sum(tmp), c_d[[j]] ) )
   
   ## compute the 'degree of functionality'
   ## for each cell, we compute the number of cytokines
@@ -120,7 +124,7 @@ preprocess <- function(dat_file, meta_file, counts_file, name, generate_proporti
   stopifnot( all( names(dof) == meta$name ) )
   
   ## merge the data sets together
-  merged <- cbind(d_prop, meta)
+  merged <- cbind(d_counts, meta)
   
   ## melt for ggplot2 usage
   d <- melt(
@@ -130,12 +134,11 @@ preprocess <- function(dat_file, meta_file, counts_file, name, generate_proporti
     variable.name="Cytokine"
   )
   
-  ## cytokine order
-  d$Cytokine_order <- 
-    stringr::str_count( d$Cytokine, " x " ) + 1L
-  
   ## more informative name for the samples
   names(d)[ names(d) == "name" ] <- "Sample"
+  
+  ## cytokine order
+  d$CytokineOrder <- stringr::str_count(d$Cytokine, "[-\\+]")
   
   ## merge in cell counts
   tmp <- data.frame(
@@ -151,10 +154,19 @@ preprocess <- function(dat_file, meta_file, counts_file, name, generate_proporti
     Sample=names(tmp),
     TotalActivated=tmp
   )
-  d <- merge( d, tmp, by="Sample", all.x=TRUE)
+  d <- merge(d, tmp, by="Sample", all.x=TRUE)
   rm(tmp)
   
+  ## denote whether a particular cytokine is on or off for a particular
+  ## combination
+  
   d <- data.table(d)
+  for (i in seq_along(cytokines)) {
+    cytokine <- cytokines[i]
+    d[[ cytokine ]] <- 0L
+    d[[ cytokine ]][ str_detect(d$Cytokine, paste0(cytokine, "+")) ] <- 2
+    d[[ cytokine ]][ str_detect(d$Cytokine, paste0(cytokine, "-")) ] <- 1
+  }
   
   ## Compute the proportions
   d[, PropTotal := Counts / TotalCellCount]
@@ -228,8 +240,9 @@ preprocess <- function(dat_file, meta_file, counts_file, name, generate_proporti
   ## dat <- d[ d$Cytokine %in% cytokines, ]
   ## saveRDS( dat, file=paste0("data/", name, "/sample_proportions_postProcess_noCombo_marginal.rds") )
   
+  saveRDS(d_counts, file=paste0("data/RV144 CaseControl/", name, "/", name, "_cytokine_combos_preprocessed.rds"))
+  
 }
 
 ## CD4
-preprocess("data/RV144 CaseControl/res.rds", "data/RV144 CaseControl/meta.rds", "data/RV144 CaseControl/cd4_counts.rds", "cd4_marginal", marginalRcpp)
-preprocess("data/RV144 CaseControl/res.rds", "data/RV144 CaseControl/meta.rds", "data/RV144 CaseControl/cd4_counts.rds", "cd4_joint", jointRcpp)
+preprocess("data/RV144 CaseControl/res.rds", "data/RV144 CaseControl/meta.rds", "data/RV144 CaseControl/cd4_counts.rds", "cd4")

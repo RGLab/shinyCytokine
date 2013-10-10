@@ -1,31 +1,46 @@
-library(RColorBrewer)
+library(hexbin)
+library(scales)
+library(gridExtra)
 library(ggplot2)
-library(Kmisc) ## devtools::install_github("Kmisc", "kevinushey", subdir="Kmisc")
+library(Kmisc) ## devtools::install_github("Kmisc", "kevinushey")
 library(shiny)
 library(reshape2)
 library(data.table)
 library(data.table.extras) ## install_github("data.table.extras", "kevinushey")
 library(gtools)
 library(stringr)
-library(scales)
 #library(rCharts)
 
 CELL_DATA <- "data/RV144 CaseControl/res.rds"
+COMBO_DATA <- "data/RV144 CaseControl/cd4/cd4_cytokine_combos_preprocessed.rds"
 COUNTS <- "data/RV144 CaseControl/cd4_counts.rds"
-DATA <- "data/RV144 CaseControl/cd4_joint/cd4_joint_sample_proportions_bg_subtracted.rds"
-DATA_MARGINAL <- "data/RV144 CaseControl/cd4_marginal/cd4_marginal_sample_proportions_bg_subtracted.rds"
+DATA <- "data/RV144 CaseControl/cd4/cd4_sample_proportions_bg_subtracted.rds"
 META <- "data/RV144 CaseControl/meta.rds"
 
 source("common_functions.R")
 
+renderSplom <- function(expr, env=parent.frame(), quoted=FALSE) {
+  func <- exprToFunction(expr, env, quoted)
+  function() {
+    val <- func()
+    df <- as.data.frame(val[[1]])
+    id <- as.character(val[[2]])
+    #str(df)
+    #str(id)
+    id_ind <- match(id, names(df))
+    cbind( df[-id_ind], df[id_ind] )
+  }
+}
+
 ## read in the data
 ## FIXME: only allocate one reference for the data
 ## need to properly handle subsetting and filtering in the plot commands
+counts <- readRDS(COUNTS)
 cell_data <- readRDS(CELL_DATA)
-d <- dat <- readRDS(DATA)
-data_marginal <- readRDS(DATA_MARGINAL)
+combo_data <- readRDS(COMBO_DATA)
+d <- dat <- droplevels(readRDS(DATA))
 l <- levels( d$Cytokine )
-orig_cytokines <- strsplit( l[ length(l) ], " x ", fixed=TRUE)[[1]]
+orig_cytokines <- readRDS("data/RV144 CaseControl/cytokines.rds")
 meta <- readRDS(META)
 counts <- readRDS(COUNTS)
 cell_counts <- data.frame(
@@ -34,50 +49,52 @@ cell_counts <- data.frame(
 )
 
 ## FIXME: remove sebctrl, negctrl?
-d <- dat 
-# d <- dat <- dat[ dat$Stim %nin% c("sebctrl", "negctrl 1", "negctrl 2"), ]
+d <- dat <- dat[ Stim %nin% c("sebctrl", "negctrl 1", "negctrl 2"), ]
 # data_marginal <- data_marginal[ data_marginal$Stim %nin% c("sebctrl", "negctrl 1", "negctrl 2"), ]
-
-## TODO: allow other plot types
-plot_type <- "boxplot"
 
 ## translates phenotype to label for different plots
 phenoToLabel <- function(x) {
   return( switch(x,
     `LogFoldChange`="Log Fold Change",
-    `Proportion`="Proportion",
-    `Proportion_bg`="Proportion\n(BG Corrected)",
-    `Proportion_log10`="Proportion\n(log10 transformed)",
-    `Proportion_bg_log10`="Proportion\n(BG corrected, log10 transformed)"
+    `PropTotal`="Proportion (rel. Total)",
+    `PropActivated`="Proportion (rel. Total Activated)",
+    `PropTotalBG`="Proportion (rel. Total, BG Corrected)",
+    `PropActivatedBG`="Proportion (rel. Total Activated, BG Corrected)"
   ) )
 }
 
-y_var <- "Sample"
-
 ## A function used to filter a dataset based on a vector of
 ## cytokines
-filter_cytokines <- function(d, cytokines, p, order, phenotype) {
+filter_cytokines <- function(d, cytokines, cytokines_to_exclude, 
+  p, order, phenotype, max_combos) {
   
   ## first, only keep cytokines that have been selected
-  if( length(cytokines) == 0 ) {
-    d <- d[ d$Cytokine %in% orig_cytokines, ]
-  } else {
-    n <- length(cytokines)
-    combos <- unlist( combinations(cytokines, function(x) {
-      paste(x, collapse=" x ")
-    }) )
-    d <- d[ d$Cytokine %in% combos, ]
+  for (cytokine in cytokines) {
+    d <- droplevels(d[ fgrep(cytokine, Cytokine), ])
+  }
+  
+  ## then, remove cytokines we wish to explicitly exclude
+  for (cytokine in cytokines_to_exclude) {
+    d <- droplevels(d[ ngrep(cytokine, Cytokine), ])
   }
   
   ## then, remove cytokine combos that have an overall proportion < p
-  props <- with(d, tapply_(d[[phenotype]], Cytokine, function(x) mean(x, na.rm=TRUE)))
+  props <- sort( decreasing=TRUE,
+    with(d, tapply_(d[[phenotype]], Cytokine, function(x) median(x, na.rm=TRUE)))
+  )
+  
   keep <- names(props)[props >= p]
   
   ## keep only terms of a certain order
-  keep_order <- str_count(keep, " x ") + 1
+  keep_order <- str_count(keep, "[-\\+]")
   keep <- keep[ keep_order >= order[1] & keep_order <= order[2] ]
   
-  d <- d[ d$Cytokine %in% keep, ]
+  ## and only keep the top 'n' of these combinations
+  if (!is.na(max_combos) && max_combos > 0 && length(keep) > max_combos) {
+    d <- d[ Cytokine %in% keep[1:max_combos], ]
+  } else {
+    d <- d[ Cytokine %in% keep, ]
+  }
   
   ## and finally, return
   return(d)
@@ -182,9 +199,9 @@ shinyServer( function(input, output, session) {
     return( input$filter1_cb )
   })
   
-  isMarginal <- reactive({
-    return( as.logical(input$marginal) )
-  })
+  #   isMarginal <- reactive({
+  #     return( as.logical(input$marginal) )
+  #   })
   
   getBoxplotOrientation <- reactive({
     return( input$boxplot_by_cytokine_orientation )
@@ -214,6 +231,14 @@ shinyServer( function(input, output, session) {
     return( input$boxplot_upper_limit )
   })
   
+  getMaxCombosToShow <- reactive({
+    return( as.integer(input$max_combos_to_show) )
+  })
+  
+  getCytokinesToExclude <- reactive({
+    return( input$cytokines_to_exclude )
+  })
+  
   ## observers
   observe({
     x <- input$individual
@@ -237,13 +262,13 @@ shinyServer( function(input, output, session) {
     updateCheckboxInput(session, "boxplot_manual_limits", value=FALSE)
   })
   
-#   observe({
-#     x <- input$heatmap_level
-#     updateSliderInput(session, 
-#       "proportion_filter", 
-#       label=paste("Remove", x, "with proportion < x")
-#     )
-#   })
+  #   observe({
+  #     x <- input$heatmap_level
+  #     updateSliderInput(session, 
+  #       "proportion_filter", 
+  #       label=paste("Remove", x, "with proportion < x")
+  #     )
+  #   })
   
   ## an observer for conditionally updating the filter widget,
   ## depending on the type of variable being used
@@ -272,9 +297,6 @@ shinyServer( function(input, output, session) {
   ## updated / filtered only once per new parameter update, rather than
   ## once for each plot generated
   
-  ## FIXME: plots no longer grey out when being updated inside an `observe`
-  ## call
-  
   ## heatmap plot
   output$heatmap <- renderPlot({
     
@@ -289,39 +311,86 @@ shinyServer( function(input, output, session) {
     filter1_cb <- getFilter1Cb()
     custom_filter <- getCustomFilter()
     flip_heatmap <- getFlipHeatmap()
-    marginal <- isMarginal()
-    
-    if (marginal) {
-      d <- data_marginal
-    } else {
-      d <- dat
-    }
+    max_combos_to_show <- getMaxCombosToShow()
+    cytokines_to_exclude <- getCytokinesToExclude()
     
     ## filter the cytokines
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order, phenotype)
+    d <- filter_cytokines(
+      d, 
+      cytokines, 
+      cytokines_to_exclude,
+      cytokine_filter, 
+      cytokine_order, 
+      phenotype, 
+      max_combos_to_show
+    )
+    
     d <- customFilter(d, custom_filter)
     d <- filter1(d, filter1, filter1_cb)
     
-    p1 <- ggplot( d, aes_string(x="Cytokine", y=y_var, fill=phenotype)) +
-      geom_tile() +
+    ## the actual heatmap
+    p1 <- ggplot( d, aes_string(x="Cytokine", y="Sample", fill=phenotype)) +
+      geom_raster() +
+      coord_flip() +
       scale_fill_gradient2(
         low="steelblue",
         mid="grey97",
         high="darkorange",
-        name=phenoToLabel(phenotype),
+        name=paste(strwrap(phenoToLabel(phenotype), 10), collapse="\n"),
         na.value="maroon"
       ) +
-      scale_x_discrete(expand=c(0,0)) +
-      scale_y_discrete(expand=c(0,0), breaks=NULL) +
-      xlab("Cytokine") +
+      scale_x_discrete('', expand=c(0,0), breaks=NULL) +
+      scale_y_discrete('', expand=c(0,0)) +
+      xlab('') +
       ylab(heatmap_level) +
-      theme( 
-        axis.text.x = element_text(angle=45, hjust=1),
-        title = element_text(family="Gill Sans")
+      theme(
+        axis.text.x=element_text(color="white"),
+        axis.ticks.x=element_line(color="white"),
+        title=element_text(family="Gill Sans"),
+        plot.margin=unit( c(0, 0, 0.9, 0), "cm" )
       )
     
+    ## the color codes
+    d_sub <- d[, c("Cytokine", orig_cytokines), with=FALSE]
+    d_sub <- data.table(melt_(d_sub, id.vars="Cytokine"))
+    setnames(d_sub, c("Combination", "Cytokine", "Used"))
+    d_sub$Cytokine <- factor_(d_sub$Cytokine, levels=orig_cytokines)
+    d_sub$Used <- factor(d_sub$Used, levels=c(0, 1, 2), labels=c("NA", "Off", "On"))
+    
+    ## we repeat 'd_sub' to be the number of unique levels generated by
+    ## facet 1 with the data set
+    if (facet1 != "Original Ordering") {
+      n <- length( unique( d[[facet1]] ) )
+    } else {
+      n <- 1
+    }
+    
+    old_nrow <- nrow(d_sub)
+    d_sub <- rbindlist( replicate(n, d_sub, simplify=FALSE) )
+    d_sub[, Facet := rep(1:n, each=old_nrow)]
+    
+    p2 <- ggplot(d_sub, aes(x=Cytokine, y=Combination, fill=Used)) +
+      geom_raster() +
+      scale_x_discrete('', expand=c(0, 0)) +
+      scale_y_discrete('', breaks=NULL, expand=c(0, 0)) +
+      scale_fill_manual(
+        values=c(
+          `NA`="grey95", 
+          `Off`="blue",
+          `On`="orange"
+        )
+      ) +
+      theme( 
+        legend.position='none',
+        strip.background=element_blank(),
+        strip.text=element_blank(),
+        plot.margin=unit( c(0, 0, 0, 0), "cm" ),
+        axis.text.x=element_text(angle=90)
+      ) +
+      facet_grid(Facet ~ .)
+    
     ## reorder by phenotype
-    if( facet1 != "Original Ordering" ) {
+    if (facet1 != "Original Ordering") {
       
       ## double facetting doesn't work for the heatmap (yet? it might be
       ## too cluttered / ugly anyhow)
@@ -333,16 +402,7 @@ shinyServer( function(input, output, session) {
       
     }
     
-    ## flip the axes?
-    if (flip_heatmap) {
-      p1 <- p1 +
-        coord_flip() +
-        theme(
-          title=element_text(family="Gill Sans")
-        )
-    }
-    
-    plot(p1)
+    grid.arrange( p2, p1, ncol=2, widths=c(15, 85))
     
   })
   
@@ -360,17 +420,21 @@ shinyServer( function(input, output, session) {
     filter1 <- getFilter1()
     filter1_cb <- getFilter1Cb()
     custom_filter <- getCustomFilter()
-    marginal <- isMarginal()
     flip_linechart <- getFlipLinechart()
-    
-    if(marginal) {
-      d <- data_marginal
-    } else {
-      d <- dat
-    }
+    max_combos_to_show <- getMaxCombosToShow()
+    cytokines_to_exclude <- getCytokinesToExclude()
     
     ## filter the cytokines
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order, phenotype)
+    d <- filter_cytokines(
+      d, 
+      cytokines, 
+      cytokines_to_exclude,
+      cytokine_filter, 
+      cytokine_order, 
+      phenotype, 
+      max_combos_to_show
+    )
+    
     d <- customFilter(d, custom_filter)
     d <- filter1(d, filter1, filter1_cb)
     
@@ -379,7 +443,7 @@ shinyServer( function(input, output, session) {
       geom_point() +
       geom_line( aes(x=as.integer( factor(Cytokine) ))) +
       xlab(paste("Individual:", individual)) +
-      ggtitle("Proportion by Cytokine") +
+      ggtitle(paste(phenoToLabel(phenotype), "by Cytokine")) +
       #guides(color=guide_legend(nrow=10)) +
       theme( 
         axis.text.x = element_text(angle=45, hjust=1),
@@ -422,14 +486,7 @@ shinyServer( function(input, output, session) {
     filter1 <- getFilter1()
     filter1_cb <- getFilter1Cb()
     custom_filter <- getCustomFilter()
-    marginal <- isMarginal()
     flip_dofplot <- input$flip_dofplot
-    
-    if(marginal) {
-      d <- data_marginal
-    } else {
-      d <- dat
-    }
     
     ## filter the cytokines
     d <- customFilter(d, custom_filter)
@@ -469,7 +526,7 @@ shinyServer( function(input, output, session) {
     samples_dof <- samples_dof[, {
       counts <- Kmisc::counts(values)
       list(counts=counts, order=names(counts))
-      }, by=ind]
+    }, by=ind]
     ## merge in cell counts
     dof <- merge.data.frame( samples_dof, cell_counts, by.x="ind", by.y="Sample", all.x=TRUE )
     dof$prop <- dof$counts.x / dof$counts.y
@@ -489,7 +546,7 @@ shinyServer( function(input, output, session) {
       ) +
       xlab("Degree of Functionality") +
       ylab("Proportion of Cells") +
-      ggtitle(paste("DOF Plot\nIndividual:", individual))
+      ggtitle(paste("Degree of Functionality\nIndividual:", individual))
     
     if( facet1 != "Original Ordering" ) {
       if( facet2 == "None" ) {
@@ -504,7 +561,7 @@ shinyServer( function(input, output, session) {
     } else {
       p <- p +
         geom_bar(stat="identity", position="dodge")
-        
+      
     }
     
     if (flip_dofplot) {
@@ -529,21 +586,26 @@ shinyServer( function(input, output, session) {
     filter1 <- getFilter1()
     filter1_cb <- getFilter1Cb()
     custom_filter <- getCustomFilter()
-    marginal <- isMarginal()
     boxplot_orientation <- getBoxplotOrientation()
     boxplot_coord_flip <- getBoxplotCoordFlip()
     boxplot_manual_limits <- getBoxplotManualLimits()
     boxplot_lower_limit <- getBoxplotLowerLimit()
     boxplot_upper_limit <- getBoxplotUpperLimit()
-    
-    if(marginal) {
-      d <- data_marginal
-    } else {
-      d <- dat
-    }
+    max_combos_to_show <- getMaxCombosToShow()
+    cytokines_to_exclude <- getCytokinesToExclude()
+    plot_type <- getPlotType()
     
     ## filter the cytokines
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order, phenotype)
+    d <- filter_cytokines(
+      d, 
+      cytokines, 
+      cytokines_to_exclude,
+      cytokine_filter, 
+      cytokine_order, 
+      phenotype, 
+      max_combos_to_show
+    )
+    
     d <- customFilter(d, custom_filter)
     d <- filter1(d, filter1, filter1_cb)
     
@@ -555,7 +617,7 @@ shinyServer( function(input, output, session) {
     
     p <- ggplot(d) +
       theme( 
-        axis.text.x = element_text(angle=45, hjust=1),
+        #axis.text.x = element_text(angle=45, hjust=1),
         title = element_text(family="Gill Sans")
       )
     
@@ -574,54 +636,110 @@ shinyServer( function(input, output, session) {
       )
     }
     
-    if( plot_type == "boxplot" ) {
-      
-      if (boxplot_coord_flip) {
-        if (facet3 != "None") {
-          p <- p +
-            ylab( phenoToLabel(phenotype) ) +
-            facet_grid(paste("Cytokine ~", facet3))
-        } else {
-          p <- p +
-            ylab( phenoToLabel(phenotype) ) +
-            facet_grid("Cytokine ~ .")
-        }
+    if (boxplot_coord_flip) {
+      if (facet3 != "None") {
+        p <- p +
+          ylab( phenoToLabel(phenotype) ) +
+          facet_grid(paste("Cytokine ~", facet3))
       } else {
-        if (facet3 != "None") {
-          p <- p +
-            ylab( phenoToLabel(phenotype) ) +
-            facet_grid(paste(facet3, "~ Cytokine"))
-        } else {
-          p <- p +
-            ylab( phenoToLabel(phenotype) ) +
-            facet_grid(". ~ Cytokine")
-        }
+        p <- p +
+          ylab( phenoToLabel(phenotype) ) +
+          facet_grid("Cytokine ~ .")
       }
-      
-      if (boxplot_orientation == "Horizontal") {
-        if (boxplot_manual_limits) {
-          p <- p +
-            coord_flip(ylim=c(boxplot_lower_limit, boxplot_upper_limit))
-        } else {
-          p <- p +
-            coord_flip()
-        }
+    } else {
+      if (facet3 != "None") {
+        p <- p +
+          ylab( phenoToLabel(phenotype) ) +
+          facet_grid(paste(facet3, "~ Cytokine"))
       } else {
-        if (boxplot_manual_limits) {
-          p <- p +
-            coord_cartesian(ylim=c(boxplot_lower_limit, boxplot_upper_limit))
-        } 
+        p <- p +
+          ylab( phenoToLabel(phenotype) ) +
+          facet_grid(". ~ Cytokine")
       }
-      
     }
     
-    
+    if (boxplot_orientation == "Horizontal") {
+      if (boxplot_manual_limits) {
+        p <- p +
+          coord_flip(ylim=c(boxplot_lower_limit, boxplot_upper_limit))
+      } else {
+        p <- p +
+          coord_flip()
+      }
+    } else {
+      if (boxplot_manual_limits) {
+        p <- p +
+          coord_cartesian(ylim=c(boxplot_lower_limit, boxplot_upper_limit))
+      } 
+    }
     
     plot(p)
     
   })
   
-  output$stats <- renderTable({
+  output$stats <- renderChart2({
+    
+    individual <- getIndividual()
+    facet1 <- getFacet1()
+    facet2 <- getFacet2()
+    facet3 <- getFacet3()
+    heatmap_level <- getHeatmapLevel()
+    cytokines <- getCytokines()
+    cytokine_filter <- getCytokineFilter()
+    cytokine_order <- getCytokineOrder()
+    phenotype <- getPhenotype()
+    filter1 <- getFilter1()
+    filter1_cb <- getFilter1Cb()
+    custom_filter <- getCustomFilter()
+    cytokines_to_exclude <- getCytokinesToExclude()
+    max_combos_to_show <- getMaxCombosToShow()
+    
+    ## filter the cytokines
+    d <- filter_cytokines(
+      d, 
+      cytokines,
+      cytokines_to_exclude,
+      cytokine_filter, 
+      cytokine_order, 
+      phenotype, 
+      max_combos_to_show
+    )
+    
+    d <- customFilter(d, custom_filter)
+    d <- filter1(d, filter1, filter1_cb)
+    d <- droplevels(d)
+    
+    if (nrow(d) == 0) {
+      return("Empty data")
+    }
+    
+    ## construct 'by' from the included facets
+    by <- "Cytokine"
+    
+    if (facet1 != "Original Ordering") {
+      by <- paste(by, facet1, sep=",")
+    }
+    
+    if (facet2 != "None") {
+      by <- paste(by, facet2, sep=",")
+    }
+    
+    if (facet3 != "None") {
+      by <- paste(by, facet3, sep=",")
+    }
+    
+    m <- d[, list(
+      Mean=mean( get(phenotype), na.rm=TRUE ),
+      Median=median( get(phenotype), na.rm=TRUE ),
+      SD=sd( get(phenotype), na.rm=TRUE ),
+      N=.N
+    ), keyby=by]
+    
+    dTable(m)
+    
+  })
+  
+  output$splom <- renderPlot({
     
     individual <- getIndividual()
     facet1 <- getFacet1()
@@ -634,40 +752,134 @@ shinyServer( function(input, output, session) {
     filter1 <- getFilter1()
     filter1_cb <- getFilter1Cb()
     custom_filter <- getCustomFilter()
-    marginal <- isMarginal()
-    
-    if(marginal) {
-      d <- data_marginal
-    } else {
-      d <- dat
-    }
+    cytokines_to_exclude <- getCytokinesToExclude()
+    max_combos_to_show <- getMaxCombosToShow()
     
     ## filter the cytokines
-    d <- filter_cytokines(d, cytokines, cytokine_filter, cytokine_order, phenotype)
+    d <- filter_cytokines(
+      d, 
+      cytokines,
+      cytokines_to_exclude,
+      cytokine_filter, 
+      cytokine_order, 
+      phenotype, 
+      max_combos_to_show
+    )
+    
     d <- customFilter(d, custom_filter)
     d <- filter1(d, filter1, filter1_cb)
     d <- droplevels(d)
     
-    if( facet1 == "Original Ordering" ) {
-      split_var <- d$Cytokine
-    } else {
-      split_var <- paste( d$Cytokine, d[[facet1]], sep=' x ' )
-    }
+    m <- combo_data[, colnames(combo_data) %in% d$Cytokine ]
+    gp <- factor(rownames(m))
+    nm <- colnames(m)
+    nm <- gsub("\\+", "\\+\n", nm)
+    nm <- gsub("-", "-\n", nm)
     
-    m <- do.call( rbind, lapply( split(d, split_var), function(DF) {
-      return( summary( DF[[phenotype]] ) )
-    } ) )
+    m[ m < 200 ] <- NA
     
-    return( as.data.frame(m) )
+    p1 <- splom(m,
+      pscales=3,
+      type=c('g', 'p'),
+      varnames=nm,
+      varname.cex=0.8,
+      panel=function(x, y, i, j, ...) {
+        cor <- sprintf("%.3f", cor(x, y, use="pairwise"))
+        expr <- as.expression( substitute( paste(
+          rho == x
+        ), list(x=cor) ) )
+        panel.hexplom(x, y, ...)
+        panel.loess(x, y, col='red', ...)
+        grid.text2(expr, x=0.5, y=0.85)
+      }
+    )
+    
+    print(p1)
     
   })
   
-  #   output$rchart <- renderChart({
-  #     
-  #     p <- rPlot( "Cytokine", phenotype, data=d, color=facet1, facet=facet2, type='point' )
-  #     p$addParams(dom="rchart", width=430, height=300)
-  #     return(p)
-  #     
-  #   })
+  output$splom_cell <- renderPlot({
+    
+    individual <- getIndividual()
+    facet1 <- getFacet1()
+    facet2 <- getFacet2()
+    heatmap_level <- getHeatmapLevel()
+    cytokines <- getCytokines()
+    cytokine_filter <- getCytokineFilter()
+    cytokine_order <- getCytokineOrder()
+    phenotype <- getPhenotype()
+    filter1 <- getFilter1()
+    filter1_cb <- getFilter1Cb()
+    custom_filter <- getCustomFilter()
+    cytokines_to_exclude <- getCytokinesToExclude()
+    max_combos_to_show <- getMaxCombosToShow()
+    
+    ## filter the cytokines
+    d <- filter_cytokines(
+      d, 
+      cytokines,
+      cytokines_to_exclude,
+      cytokine_filter, 
+      cytokine_order, 
+      phenotype, 
+      max_combos_to_show
+    )
+    
+    d <- customFilter(d, custom_filter)
+    d <- filter1(d, filter1, filter1_cb)
+    d <- droplevels(d)
+    
+    samples <- unique(d$Sample)
+    dat <- cell_data[ names(cell_data) %in% samples ]
+    m <- do.call(rbind, dat)
+    if (nrow(m) > 1E4) {
+      m <- m[1:1E4, ]
+    }
+    
+    p1 <- hexplom(m,
+      xbins=8,
+      pscales=3,
+      type=c('g', 'p'),
+      varname.cex=0.8,
+      panel=function(x, y, ...) {
+        tx <- x[x > 0 & y > 0]
+        ty <- y[x > 0 & y > 0]
+        if (length(tx) == 0 || length(ty) == 0) {
+          panel.text("No data")
+        }
+        panel.hexbinplot(tx, ty, ...)
+      }
+    )
+    
+    print(p1)
+    
+  })
+  
+  output$splom <- renderSplom({
+    
+    individual <- getIndividual()
+    facet1 <- getFacet1()
+    facet2 <- getFacet2()
+    heatmap_level <- getHeatmapLevel()
+    cytokines <- getCytokines()
+    cytokine_filter <- getCytokineFilter()
+    cytokine_order <- getCytokineOrder()
+    phenotype <- getPhenotype()
+    filter1 <- getFilter1()
+    filter1_cb <- getFilter1Cb()
+    custom_filter <- getCustomFilter()
+    cytokines_to_exclude <- getCytokinesToExclude()
+    max_combos_to_show <- getMaxCombosToShow()
+    
+    ## take the selected individual
+    
+    samples <- as.character(unique(d$Sample[ d$PTID == individual ]))
+    dat <- cell_data[ names(cell_data) %in% samples ]
+    dat <- lapply(dat, as.data.frame)
+    m <- rbindlistn(dat, TRUE)
+    setnames(m, ".Names", "Sample")
+    list(m, "Sample")
+    
+  })
   
 })
