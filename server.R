@@ -129,6 +129,14 @@ filter1 <- function(dat, var, levels) {
 
 shinyServer( function(input, output, session) {
   
+  ## global variables for the data state
+  ## NULL variables are updated by other functions
+  d <- dat
+  m <- NULL
+  dof <- NULL
+  row_order <- NULL
+  col_order <- NULL
+  
   ## define getters
   
   getPhenotype <- reactive({
@@ -304,18 +312,7 @@ shinyServer( function(input, output, session) {
   ## wrap data updates in an observer
   observe({
     
-    
-    
-    
-  })
-  
-  ## heatmap plot
-  output$heatmap <- renderPlot({
-    
-    facet1 <- getFacet1()
-    facet2 <- getFacet2()
-    facet3 <- getFacet3()
-    heatmap_level <- getHeatmapLevel()
+    ## The variables we need to observe for updating the data
     cytokines <- getCytokines()
     cytokine_filter <- getCytokineFilter()
     cytokine_dof <- getCytokineOrder()
@@ -323,16 +320,11 @@ shinyServer( function(input, output, session) {
     filter1 <- getFilter1()
     filter1_cb <- getFilter1Cb()
     custom_filter <- getCustomFilter()
-    flip_heatmap <- getFlipHeatmap()
     max_combos_to_show <- getMaxCombosToShow()
     cytokines_to_marginalize_over <- getCytokinesToMarginalizeOver()
     
-    if (facet1 == "Original Ordering") facet1 <- NULL
-    if (facet2 == "None") facet2 <- NULL
-    if (facet3 == "None") facet3 <- NULL
-    
     ## filter the cytokines
-    d <- filter_cytokines(
+    tmp <- filter_cytokines(
       d, 
       cytokines, 
       cytokines_to_marginalize_over,
@@ -342,16 +334,16 @@ shinyServer( function(input, output, session) {
       max_combos_to_show
     )
     
-    d <- customFilter(d, custom_filter)
-    d <- filter1(d, filter1, filter1_cb)
+    tmp <- customFilter(tmp, custom_filter)
+    tmp <- filter1(tmp, filter1, filter1_cb)
     
     ## Cast the cytokine data down into a matrix
-    m <- acast(d, Sample ~ Cytokine, value.var=phenotype)
+    m <<- acast(tmp, Sample ~ Cytokine, value.var=phenotype)
     
     ## Rows are samples, columns are cytokine combinations
     
     ## Generate the cytokine / column annotations
-    annot <- data.frame(do.call(cbind, lapply(orig_cytokines, function(x) {
+    annot <<- data.frame(do.call(cbind, lapply(orig_cytokines, function(x) {
       
       ## the positives
       pos <- as.integer(grepl( paste0(x, "\\+"), colnames(m)))
@@ -372,19 +364,32 @@ shinyServer( function(input, output, session) {
     
     ## Order the columns by degree of functionality, number of
     ## marginals, and then actual mean phenotype.
-    dof <- apply(annot, 1, function(x) {
+    dof <<- apply(annot, 1, function(x) {
       sum(x == 1)
     })
     
-    nom <- apply(annot, 1, function(x) {
+    nom <<- apply(annot, 1, function(x) {
       sum(x == 0)
     })
     
-    mean_pheno <- apply(m, 2, function(x) {
+    mean_pheno <<- apply(m, 2, function(x) {
       mean(x, na.rm=TRUE)
     })
     
-    col_order <- do.call(order, list(dof, nom, mean_pheno))
+    col_order <<- do.call(order, list(dof, nom, mean_pheno))
+    
+    d <<- tmp
+    
+  })
+  
+  ## heatmap plot
+  output$heatmap <- renderPlot({
+    
+    facet1 <- getFacet1()
+    facet2 <- getFacet2()
+    facet3 <- getFacet3()
+    heatmap_level <- getHeatmapLevel()
+    phenotype <- getPhenotype()
     
     ## A quick function used for getting a nice color palette
     heatmap_color <- function(phenotype) {
@@ -393,6 +398,10 @@ shinyServer( function(input, output, session) {
         colorRampPalette(brewer.pal(n=7, name="PuOr"))(100)
       )
     }
+    
+    if (facet1 == "Original Ordering") facet1 <- NULL
+    if (facet2 == "None") facet2 <- NULL
+    if (facet3 == "None") facet3 <- NULL
     
     ## Generate the row annotations; ie, annotate each row (sample) by
     ## facet
@@ -441,30 +450,8 @@ shinyServer( function(input, output, session) {
     facet1 <- getFacet1()
     facet2 <- getFacet2()
     heatmap_level <- getHeatmapLevel()
-    cytokines <- getCytokines()
-    cytokine_filter <- getCytokineFilter()
-    cytokine_dof <- getCytokineOrder()
     phenotype <- getPhenotype()
-    filter1 <- getFilter1()
-    filter1_cb <- getFilter1Cb()
-    custom_filter <- getCustomFilter()
     flip_linechart <- getFlipLinechart()
-    max_combos_to_show <- getMaxCombosToShow()
-    cytokines_to_marginalize_over <- getCytokinesToMarginalizeOver()
-    
-    ## filter the cytokines
-    d <- filter_cytokines(
-      d, 
-      cytokines, 
-      cytokines_to_marginalize_over,
-      cytokine_filter, 
-      cytokine_dof, 
-      phenotype, 
-      max_combos_to_show
-    )
-    
-    d <- customFilter(d, custom_filter)
-    d <- filter1(d, filter1, filter1_cb)
     
     d_sub <- droplevels( d[ d$PTID == individual, ] )
     p <- ggplot( d_sub, aes_string(x="Cytokine", y=phenotype, group="Sample")) +
@@ -507,19 +494,8 @@ shinyServer( function(input, output, session) {
     facet1 <- getFacet1()
     facet2 <- getFacet2()
     heatmap_level <- getHeatmapLevel()
-    cytokines <- getCytokines()
-    cytokine_filter <- getCytokineFilter()
-    cytokine_dof <- getCytokineOrder()
     phenotype <- getPhenotype()
-    filter1 <- getFilter1()
-    filter1_cb <- getFilter1Cb()
-    custom_filter <- getCustomFilter()
     flip_dofplot <- input$flip_dofplot
-    
-    ## filter the cytokines
-    d <- customFilter(d, custom_filter)
-    d <- filter1(d, filter1, filter1_cb)
-    d <- d[ d$PTID == individual, ]
     
     ## get the samples belonging to the currently selected individual
     samples <- cell_data[ names(cell_data) %in% d$Sample ]
@@ -623,20 +599,6 @@ shinyServer( function(input, output, session) {
     cytokines_to_marginalize_over <- getCytokinesToMarginalizeOver()
     plot_type <- getPlotType()
     
-    ## filter the cytokines
-    d <- filter_cytokines(
-      d, 
-      cytokines, 
-      cytokines_to_marginalize_over,
-      cytokine_filter, 
-      cytokine_dof, 
-      phenotype, 
-      max_combos_to_show
-    )
-    
-    d <- customFilter(d, custom_filter)
-    d <- filter1(d, filter1, filter1_cb)
-    
     if( facet1 == "Original Ordering" ) {
       plot( 1 ~ 1, type='n', axes=FALSE, frame.plot=FALSE, ann=FALSE)
       text( x=1, y=1, labels="Select a Facet to view Boxplots of Proportions by Cytokine")
@@ -722,21 +684,6 @@ shinyServer( function(input, output, session) {
     cytokines_to_marginalize_over <- getCytokinesToMarginalizeOver()
     max_combos_to_show <- getMaxCombosToShow()
     
-    ## filter the cytokines
-    d <- filter_cytokines(
-      d, 
-      cytokines,
-      cytokines_to_marginalize_over,
-      cytokine_filter, 
-      cytokine_dof, 
-      phenotype, 
-      max_combos_to_show
-    )
-    
-    d <- customFilter(d, custom_filter)
-    d <- filter1(d, filter1, filter1_cb)
-    d <- droplevels(d)
-    
     if (nrow(d) == 0) {
       return("Empty data")
     }
@@ -783,21 +730,6 @@ shinyServer( function(input, output, session) {
     cytokines_to_marginalize_over <- getCytokinesToMarginalizeOver()
     max_combos_to_show <- getMaxCombosToShow()
     
-    ## filter the cytokines
-    d <- filter_cytokines(
-      d, 
-      cytokines,
-      cytokines_to_marginalize_over,
-      cytokine_filter, 
-      cytokine_dof, 
-      phenotype, 
-      max_combos_to_show
-    )
-    
-    d <- customFilter(d, custom_filter)
-    d <- filter1(d, filter1, filter1_cb)
-    d <- droplevels(d)
-    
     m <- combo_data[, colnames(combo_data) %in% d$Cytokine ]
     gp <- factor(rownames(m))
     nm <- colnames(m)
@@ -842,21 +774,6 @@ shinyServer( function(input, output, session) {
     cytokines_to_marginalize_over <- getCytokinesToMarginalizeOver()
     max_combos_to_show <- getMaxCombosToShow()
     
-    ## filter the cytokines
-    d <- filter_cytokines(
-      d, 
-      cytokines,
-      cytokines_to_marginalize_over,
-      cytokine_filter, 
-      cytokine_dof, 
-      phenotype, 
-      max_combos_to_show
-    )
-    
-    d <- customFilter(d, custom_filter)
-    d <- filter1(d, filter1, filter1_cb)
-    d <- droplevels(d)
-    
     samples <- unique(d$Sample)
     dat <- cell_data[ names(cell_data) %in% samples ]
     m <- do.call(rbind, dat)
@@ -889,9 +806,6 @@ shinyServer( function(input, output, session) {
     facet1 <- getFacet1()
     facet2 <- getFacet2()
     heatmap_level <- getHeatmapLevel()
-    cytokines <- getCytokines()
-    cytokine_filter <- getCytokineFilter()
-    cytokine_dof <- getCytokineOrder()
     phenotype <- getPhenotype()
     filter1 <- getFilter1()
     filter1_cb <- getFilter1Cb()
