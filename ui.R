@@ -15,7 +15,7 @@ splomOutput <- function(outputId) {
 
 #meta <- readRDS("data/RV144 CaseControl/meta.rds")
 dat <- readRDS("data/RV144 CaseControl/res.rds")
-dat_post <- readRDS("data/RV144 CaseControl/cd4/cd4_sample_proportions_bg_subtracted.rds")
+dat_post <- readRDS("data/RV144 CaseControl/cd4/cd4_data.rds")
 
 ## hacky fix for the new data for the case/control RV144 data
 ## ie, the meta-data is pulled from dat_post, rather than the separately defined
@@ -80,6 +80,7 @@ shinyUI( bootstrapPage(
       id='controls-container', 
       selectInput("phenotype", label="Phenotype", choices=list(
         `Log Fold Change`="LogFoldChange",
+        `Posterior Probability of Expression`="MeanGamma",
         `Proportion (rel. Total)`="PropTotal",
         `Proportion (rel. Total Activated`="PropActivated",
         `Proportion (BG Corrected, rel. Total)`="PropTotalBG",
@@ -95,18 +96,9 @@ shinyUI( bootstrapPage(
       ),
       HTML("</select>"),
       
-#       selectInput("cytokines",
-#         label="Cytokine combinations must contain...",
-#         choices=c(
-#           cytokines_positive,
-#           cytokines_negative
-#         ),
-#         multiple=TRUE
-#       ),
-      
       tags$div( class="overflow-auto",
-        checkboxGroupInput("cytokines_to_exclude",
-          label="Do not include cytokine combinations containing...",
+        checkboxGroupInput("cytokines_to_marginalize_over",
+          label="Marginalize subsets over...",
           choices=cytokines
         )
       ),
@@ -122,7 +114,7 @@ shinyUI( bootstrapPage(
         tags$div( style="float: right; width: 50%;",
           numericInput("max_combos_to_show",
             label=HTML("Show <span style='font-family: monospace;'>n</span> most highly expressed cytokine combinations"),
-            value=5
+            value=40
           )
         )
       ),
@@ -131,12 +123,12 @@ shinyUI( bootstrapPage(
       ## see: http://stackoverflow.com/questions/218760/how-do-you-keep-parents-of-floated-elements-from-collapsing
       tags$div(
         tags$div( style="width: 50%; float: left;",
-          tags$label( `for`="cytokine_order_min", "Minimum Cytokine Order Combination"),
-          tags$input( id="cytokine_order_min", type="number", value="1", min="1", max=ncol( dat[[1]] ), step="1" )
+          tags$label( `for`="cytokine_dof_min", "Minimum Degree of Functionality"),
+          tags$input( id="cytokine_dof_min", type="number", value="1", min="1", max=ncol( dat[[1]] ), step="1" )
         ),
         tags$div( style="width: 50%; float: right;", 
-          tags$label( `for`="cytokine_order_max", "Maximum Cytokine Order Combination"),
-          tags$input( id="cytokine_order_max", type="number", value="2", min="1", max=ncol( dat[[1]] ), step="1" )
+          tags$label( `for`="cytokine_dof_max", "Maximum Degree of Functionality"),
+          tags$input( id="cytokine_dof_max", type="number", value="6", min="1", max=ncol( dat[[1]] ), step="1" )
         )
       ),
       
@@ -189,11 +181,7 @@ shinyUI( bootstrapPage(
   gridster( width=width, height=height,
     
     gridsterItem(row=1, col=2, sizex=2, sizey=1,
-      h4( style="text-align: center;",
-        "Phenotype by Sample"
-      ),
-      plotOutput("heatmap", width=width*2, height=height-60),
-      checkboxInput("flip_heatmap", "Flip Axes?", value=FALSE),
+      plotOutput("heatmap", width=width*2, height=height),
       zoomButton("zoom-heatmap")
     ),
     

@@ -18,6 +18,7 @@ $( function() {
   });
   
   // similarly for #stats
+  /*
   $("#stats").mouseover( function() {
     $("body").css("overflow", "hidden");
   });
@@ -25,6 +26,7 @@ $( function() {
   $("#stats").mouseout( function() {
     $("body").css("overflow", "initial");
   });
+  */
   
   
   

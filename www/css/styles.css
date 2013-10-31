@@ -35,7 +35,7 @@ input {
 
 #cytokines .checkbox,
 #cytokines_marginalize .checkbox,
-#cytokines_to_exclude .checkbox {
+#cytokines_to_marginalize_over .checkbox {
   font-family: monospace;
   float: left;
   margin: 5px;

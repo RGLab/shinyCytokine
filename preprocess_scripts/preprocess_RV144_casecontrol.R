@@ -1,13 +1,17 @@
 ## preprocessing of data for cytokine visualization script
 
-library(stringr)
-library(car)
-library(Kmisc) ## devtools::install_github("Kmisc", "kevinushey", subdir="Kmisc")
-library(data.table.extras) ## devtools::install_github("data.table.extras", "kevinushey")
-library(reshape2)
-library(testthat)
-library(plyr)
-library(flowCore)
+suppressPackageStartupMessages({
+  library(Rcpp)
+  library(stringr)
+  library(car)
+  library(Kmisc) ## devtools::install_github("Kmisc", "kevinushey", subdir="Kmisc")
+  library(data.table.extras) ## devtools::install_github("data.table.extras", "kevinushey")
+  library(reshape2)
+  library(testthat)
+  library(plyr)
+  library(flowCore)
+  library(COMPASS)
+})
 
 source("common_functions.R")
 sourceCpp("preprocess_scripts/generate_proportions.cpp")
@@ -246,3 +250,150 @@ preprocess <- function(dat_file, meta_file, counts_file, name) {
 
 ## CD4
 preprocess("data/RV144 CaseControl/res.rds", "data/RV144 CaseControl/meta.rds", "data/RV144 CaseControl/cd4_counts.rds", "cd4")
+
+## A function for merging a set of results (as retrieved from Lynn)
+
+## debug
+data_loc <- "data/RV144 CaseControl/cd4/cd4_sample_proportions_bg_subtracted.rds"
+results_loc <- "data/RV144 CaseControl/Paperdata_RV144_CC.RData"
+map_loc <- "data/RV144 CaseControl/PTID_map_case_control.csv"
+
+merge_results <- function(data_loc, results_loc, map_loc) {
+  
+  ## get the things we need
+  data <- readRDS(data_loc)
+  env <- new.env()
+  load(results_loc, envir=env)
+  
+  ## we need to make sure we're using cytokine names in the same order
+  ## as the previous preprocessing script
+  cyto <- unlist(strsplit( as.character(data$Cytokine)[ data$CytokineOrder == 6 ][1], "[-\\+]"))
+    
+  Mgamma <- env$Mgamma
+  map <- read.csv(map_loc, header=TRUE, sep=",", stringsAsFactors=FALSE)
+  rownames(Mgamma) <- swap( rownames(Mgamma), map$PTID_orig, map$PTID )
+  
+  ## we want to fill Mgamma with zeroes for the cytokines not included
+  combos <- do.call( paste0, (do.call( expand.grid, replicate(6, c(0, 1), simplify=FALSE) ) ) )
+  for (combo in combos) {
+    if (combo %nin% colnames(Mgamma)) {
+      Mgamma[combo] <- 0
+    }
+  }
+  
+  Mgamma <- Mgamma[ order(colnames(Mgamma)) ]
+  Mgamma <- as.matrix(Mgamma)
+  
+  ## convert the column names of Mgamma
+  colnames(Mgamma) <- unlist( lapply(strsplit(colnames(Mgamma), "", fixed=TRUE), function(x) {
+    paste0(paste0(cyto, swap(x, c("0", "1"), c("-", "+"))), collapse="")
+  }))
+  
+  melted <- melt_( as.matrix(Mgamma) )
+  melted <- data.table(melted)
+  setnames(melted, c("PTID", "Cytokine", "MeanGamma"))
+  melted[, Cytokine2 := gsub("[[:alnum:]]", "", Cytokine)]
+  
+  cyto_plus <- paste0(cyto, "+")
+  
+  ## we need to pre-process and compute all possible collapses of the data
+  melted[, (cyto) := {
+    tmp <- strsplit(Cytokine2, "", fixed=TRUE)
+    tmp <- lapply(tmp, function(x) {
+      as.numeric( swap(x, c("-", "+"), c("0", "1")) )
+    })
+    tmp <- as.data.frame( t( as.matrix( as.data.frame(tmp) ) ) )
+    setNames( tmp, cyto )
+  }]
+  
+  combos <- combinations(cyto)
+  marginals <- vector("list", length(combos))
+  
+  for (i in seq_along(combos)) {
+    
+    message("Combo ", i, " of ", length(combos), ".")
+    combo <- combos[[i]]
+    
+    ## first, generate the tables
+    m <- melted[, list(MeanGamma=mean(MeanGamma)), 
+      by=eval(paste("PTID", paste(combo, collapse=","), sep=","))
+    ]
+    
+    ## now, add the cytokine column
+    m[, Cytokine := {
+      tmp <- character( nrow(m) )
+      for (i in 1:length(tmp)) {
+        tmp[[i]] <- paste( sep="", collapse="",
+          names(.SD), 
+          swap(
+            unlist(.SD[i]), 
+            c("0", "1"), 
+            c("-", "+")
+          ) )
+      }
+      list(tmp)
+    }, .SDcols=combo]
+    
+    del(m, list=combo)
+    
+    ## assign it to the list
+    marginals[[i]] <- m
+  }
+  
+  m <- rbindlist(marginals)
+  data$Cytokine <- as.character(data$Cytokine)
+  
+  ## do some incredibly terrible things to ensure the two datasets
+  ## can be merged correctly
+  data[, Barf := {
+    cytos <- strsplit(Cytokine, "[-\\+]")
+    signs <- strsplit( gsub("[[:alnum:]]", "", Cytokine), "", fixed=TRUE )
+    orders <- lapply(cytos, order)
+    
+    stopifnot( identical( length(cytos), length(orders) ) )
+    stopifnot( identical( length(cytos), length(signs) ) )
+    
+    garbage <- vector("list", length(cytos))
+    for (i in seq_along(garbage)) {
+      if (i %% 10000 == 0) message("Iteration ", i, " of ", length(garbage), ".")
+      garbage[[i]] <- paste( cytos[[i]][ orders[[i]] ], signs[[i]][ orders[[i]] ], sep='' )
+    }
+    unlist( lapply( garbage, function(x) paste(x, collapse="") ) )
+  }]
+  
+  m[, Barf := {
+    cytos <- strsplit(Cytokine, "[-\\+]")
+    signs <- strsplit( gsub("[[:alnum:]]", "", Cytokine), "", fixed=TRUE )
+    orders <- lapply(cytos, order)
+    
+    stopifnot( identical( length(cytos), length(orders) ) )
+    stopifnot( identical( length(cytos), length(signs) ) )
+    
+    garbage <- vector("list", length(cytos))
+    for (i in seq_along(garbage)) {
+      if (i %% 10000 == 0) message("Iteration ", i, " of ", length(garbage), ".")
+      garbage[[i]] <- paste( cytos[[i]][ orders[[i]] ], signs[[i]][ orders[[i]] ], sep='' )
+    }
+    unlist( lapply( garbage, function(x) paste(x, collapse="") ) )
+  }]
+  
+  m[, Cytokine := Barf]
+  data[, Cytokine := Barf]
+  
+  del(m, Barf)
+  del(data, Barf)
+  
+  setkeyv(m, c("PTID", "Cytokine"))
+  setkeyv(data, c("PTID", "Cytokine"))
+  
+  stopifnot( identical(
+    sort(unique(m$Cytokine)),
+    sort(unique(data$Cytokine))
+  ) )
+  
+  data <- m[data]
+  
+  saveRDS(data, file="data/RV144 CaseControl/cd4/cd4_data.rds")
+  
+}
+
